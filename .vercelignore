@@ -1,0 +1,19 @@
+# Vercel serves only the storefront. The server lives on Railway, and its
+# sources are not needed on the static domain: extra code at a public
+# address is an invitation to study how we read the chain.
+server/
+node_modules/
+package-lock.json
+# Secrets, wherever a stray copy ends up. The real key folder lives outside
+# this repository; this line is here so that a copy left behind by mistake
+# never reaches the domain.
+.env
+# Sources of the mark and the roughs for the images. They have no business
+# on the domain: this is 22 megabytes of renders and previews that are only
+# needed while working.
+brand/
+tools/
+# The project for the film. These are the Remotion sources and a finished
+# mp4 of a hundred and fifty megabytes: the storefront does not reference it
+# in a single line, and it doubles the weight of the deploy.
+video/

@@ -1,0 +1,764 @@
+/* =========================================================================
+   The basket cards.
+
+   A separate file for the same reason as hero.css: base.css is somebody
+   else's compiled CSS out of the archive, and edits inside it can be neither
+   read nor rolled back. Here there is only what overrides .tcards / .tc.
+
+   WHAT KIND OF CARD THIS IS
+
+   The six seats of the basket are the entire product of the project, and
+   people look at them. That means the card has to read as a card: a separate
+   object you could pick up, not a cell in a table.
+
+   Before the fix it read as a cell, and the reason was not taste but four
+   measurable things:
+
+     1. There was no gap between the cards. In base.css the grid is built
+        with the "background = line, gap = 1px" device: six tiles share their
+        edges and look like a ruled table. That is the main one.
+     2. The card had neither a border of its own nor a shadow, nothing said
+        "this is an object".
+     3. The art was short (1 / .46), and the top of the card looked like an
+        empty field with a little circle in the middle.
+     4. The leader's card was filled with the accent end to end. A solid
+        green rectangle shouts "selected" rather than "first", and it
+        flattens the icon.
+
+   WHAT IS DELIBERATELY NOT HERE
+
+   Rarity badges, the "epics" and "legendaries" and the frames coloured by
+   rarity. The neighbours on this chain have them, and for them that is
+   honest: they are selling a lottery.
+
+   We are selling exactly the opposite: **all six seats are equal**, 16.67%
+   each. So where a lootbox puts rarity, we put the seat number, and the
+   share printed on all six is the same. Six identical numbers side by side
+   are themselves the statement. Drawing rarity where there is none would be
+   lying in the most visible place on the page.
+
+   THE SIGNATURE OF THE CARD
+
+   The punch hole for a ring at the top. The name of the project means a pack
+   of six, and the card hangs in a bundle like a can in a plastic yoke. The
+   device is ours, nobody on this chain has anything like it, and it needs
+   neither images nor fonts.
+   ========================================================================= */
+
+/* ---------- the grid ----------
+   A gap instead of lines. base.css draws the grid with the "line background
+   plus gap: 1px" device; for a table that is good, for six objects it is
+   not. */
+.tcards {
+  background: none;
+  border: 0;
+  gap: clamp(.6rem, 1.3vw, 1.1rem);
+  grid-template-columns: 1fr;
+  /* The card shadows reach past their boxes; without headroom at the bottom
+     they get cut off by the edge of the section. */
+  padding-bottom: .4rem;
+  /* A ceiling on the width: without it, on a wide screen the card stretches
+     past four hundred pixels and turns landscape. A card reads as a card
+     when it is vertical. */
+  max-width: 84rem;
+  margin-inline: auto;
+}
+
+@media (min-width: 560px) {
+  .tcards { grid-template-columns: 1fr 1fr; }
+}
+
+/* FIVE COLUMNS, NOT THREE.
+
+   Three used to stand here, and it stood correctly while there were SIX
+   seats: in five columns a six laid out as 5 + 1, while three gave two even
+   rows, and "six" could be read straight off the layout.
+
+   The seats became ten, and the layout stayed. Ten by three is 3 + 3 + 3 +
+   1, that is, exactly the trouble the three columns were saving us from,
+   only the other way around now. Five give two even rows of five, and "ten"
+   reads off the layout the way the six used to.
+
+   The rule worth remembering: the number of columns here is not taste but a
+   divisor of the number of seats. When MODEL.seats changes, this gets
+   checked too. */
+@media (min-width: 880px) {
+  .tcards { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* ---------- the card itself ---------- */
+.tc {
+  gap: .3rem;
+  /* A seven pixel margin all around: the art no longer butts against the
+     edge but lies inside a frame, like the picture on a playing card. The
+     inner line below runs exactly along its rim. */
+  padding: 7px 7px .85rem;
+  position: relative;
+  isolation: isolate;
+  overflow: visible;                 /* the punch hole at the top reaches past the edge */
+  border: 1px solid var(--color-rule);
+  border-radius: 12px;
+  background-color: var(--color-ink);
+  /* An inner frame six pixels from the edge, like the margin of a playing
+     card. Done with an outline offset inwards rather than with a
+     pseudo-element: both pseudo-elements are taken by the punch hole and
+     the foil. */
+  outline: 1px solid color-mix(in srgb, var(--color-bone) 7%, transparent);
+  outline-offset: -6px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-bone) 6%, transparent),
+    0 10px 26px -14px #000;
+  transition: transform .16s, border-color .16s, box-shadow .16s, outline-color .16s;
+}
+
+@media (hover: hover) {
+  .tc:hover { outline-color: color-mix(in srgb, var(--color-neon) 26%, transparent); }
+}
+
+.tc > *:not(.tc-art) { margin-inline: .55rem; }
+
+@media (hover: hover) {
+  .tc:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--color-neon) 40%, var(--color-rule));
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--color-bone) 8%, transparent),
+      0 16px 34px -14px #000,
+      0 0 0 1px color-mix(in srgb, var(--color-neon) 18%, transparent),
+      0 0 30px -6px color-mix(in srgb, var(--color-neon) 22%, transparent);
+  }
+}
+
+/* The punch hole for a ring. It sits on the top rim, half of it outside,
+   so that it reads as a punched hole rather than a drawn circle. */
+.tc::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  top: -7px;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin-left: -7.5px;
+  border-radius: 50%;
+  background: var(--color-ink-2);
+  box-shadow:
+    0 0 0 1px var(--color-rule),
+    inset 0 2px 3px -1px #000;
+  pointer-events: none;
+}
+
+/* The foil: a thin frame in the accent colour that comes through on hover.
+   A pseudo-element on top rather than a border, because a border would have
+   shifted the content by a pixel and the whole grid would twitch under the
+   cursor. */
+.tc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 12px;
+  transition: opacity .16s;
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--color-neon) 55%, transparent) 0%,
+      transparent 38%,
+      transparent 62%,
+      color-mix(in srgb, var(--color-neon) 30%, transparent) 100%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  padding: 1px;
+}
+
+@media (hover: hover) {
+  .tc:hover::after { opacity: 1; }
+}
+
+/* ---------- the first seat ----------
+   It no longer has a special frame, and that is a fix rather than a
+   simplification.
+
+   There was a green border with a glow, so that the first seat would read as
+   first. On cards where the window is now painted in the colour of the token
+   itself, it became redundant and harmful: five cards alike, the sixth
+   outlined in the accent, and the first thing you think is "what is wrong
+   with that one". A mark of rank turned out to look like a mark of state.
+
+   The rank is written right on the card anyway: "01/6" in the corner. The
+   same thing said twice, in two different languages, reads as two different
+   messages. */
+.tc.lead {
+  /* Nothing beyond the ordinary card. The rules below cancel the colours
+     from base.css, they are still needed, see the explanation there. */
+}
+
+
+
+/* base.css paints ALL of the leader's content in the ink colour, seven
+   rules written for an accent fill that no longer exists. Without cancelling
+   them the dark text lands on a dark background: on the very first
+   screenshot the card lost both its name and its 24 hour change, not "went
+   pale" but vanished completely. We cancel them one by one rather than with
+   a blanket `color`, because base.css has the higher specificity. */
+.tc.lead { color: var(--color-h2c); }
+.tc.lead .tc-top b { color: var(--color-bone); }
+.tc.lead .up { color: var(--color-neon); }
+/* #ff5b3d used to stand here, the only red on the whole site apart from the
+   mark, and by agreement it should not exist. The fall is painted in the
+   shared tone. */
+.tc.lead .dn { color: var(--color-down); }
+.tc.lead .nm,
+.tc.lead .ch .ago { color: var(--color-mute); }
+.tc.lead .pr { color: var(--color-bone); }
+.tc.lead .wbar em { color: var(--color-h2c); }
+.tc.lead .tc-foot .val { color: var(--color-bone); }
+.tc.lead .tc-foot { border-top-color: var(--color-rule); }
+
+/* ---------- the art ----------
+   The icon is NOT stretched to the full width, and that is the main decision
+   here.
+
+   Measured on 26 August: for the six members of the basket the icons arrived
+   at 350, 640, 720, 800, 800 and fifty pixels. Fifty pixels stretched across
+   a card is mush, and one of those makes the whole row look broken. Other
+   people's images arrive as they are, we cannot change their size.
+
+   So the icon stands as a medallion of constant size: large ones are
+   squeezed down and stay sharp, small ones are enlarged twice over at most.
+   The row looks even no matter who made it into the basket.
+
+   The panel became taller (it used to be 1 / .46): a short one made the card
+   look like a table row with a picture rather than like a card. */
+.tc-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  aspect-ratio: 1 / .78;
+  margin: 0 0 .7rem;
+  overflow: hidden;
+  border-radius: 7px;
+  background-color: var(--color-block-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-bone) 5%, transparent);
+}
+
+/* The corner marks are the same device the section headings use across the
+   whole page. Four of them in one pseudo-element: four gradients in the
+   corners. */
+.tc-art::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--color-rule-2) 0 0) 0 0 / 8px 1px,
+    linear-gradient(var(--color-rule-2) 0 0) 0 0 / 1px 8px,
+    linear-gradient(var(--color-rule-2) 0 0) 100% 0 / 8px 1px,
+    linear-gradient(var(--color-rule-2) 0 0) 100% 0 / 1px 8px,
+    linear-gradient(var(--color-rule-2) 0 0) 0 100% / 8px 1px,
+    linear-gradient(var(--color-rule-2) 0 0) 0 100% / 1px 8px,
+    linear-gradient(var(--color-rule-2) 0 0) 100% 100% / 8px 1px,
+    linear-gradient(var(--color-rule-2) 0 0) 100% 100% / 1px 8px;
+  background-repeat: no-repeat;
+  opacity: .8;
+}
+
+
+/* Our mark, in the place of the medallion and at the same size. */
+.tc-art-in {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-rule-2);
+}
+
+.tc-art-in svg {
+  width: 46px;
+  height: auto;
+}
+
+/* The medallion. Constant size, round shape, cropped to the centre.
+
+   A ground lighter than the background and a ring along the edge, because
+   the icons arrive as they are: CASHCAT's is almost black and on a dark
+   ground it read as a hole in the card rather than as a coin. The ring
+   outlines the circle regardless of what is inside it, and a dark icon stops
+   merging with the background. */
+/* A rounded square rather than a medallion, and in fractions of the card
+   rather than in pixels: on a narrow card a fixed ninety six pixels looked
+   like a postage stamp, and on a wide one they got lost. A fraction holds
+   the same look at any width.
+
+   A square takes noticeably more area than a circle of the same size, so
+   with the same margin around it the icon reads larger and the detail on it
+   is visible. */
+.tc-art img {
+  position: relative;
+  z-index: 1;
+  width: 62%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 18%;
+  object-fit: cover;
+  background: var(--color-block);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-bone) 14%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--color-ink) 62%, transparent),
+    0 12px 26px -8px #000,
+    0 0 26px color-mix(in srgb, var(--color-neon) 16%, transparent);
+  opacity: 0;
+  animation: tc-art-in .28s ease forwards;
+}
+
+@keyframes tc-art-in { to { opacity: 1; } }
+
+/* Once the icon has loaded the mark underneath is not needed: it would show
+   through at the edges of images with a transparent background. */
+.tc-art.has-icon .tc-art-in { opacity: 0; }
+
+@media (hover: hover) {
+  .tc:hover .tc-art img { transform: scale(1.05); transition: transform .3s; }
+}
+
+
+.tc.waiting .tc-art { opacity: .35; }
+
+/* ---------- the seat number ----------
+   It lies on the art rather than under it: on a card the number is its
+   ordinal mark, and its place is in the corner of the picture.
+
+   In the same place where a lootbox would put rarity. The word "seat" is
+   added by the style rather than by the markup: app.js substitutes the
+   number, and going in there for the sake of a label means keeping the text
+   in two places.
+
+   It reads as "the first of six" rather than "01" out of who knows how many.
+   The denominator is substituted by app.js from MODEL.seats: a six written
+   in here would outlive a change in the size of the basket and lie
+   silently. */
+.tc-top .rk {
+  position: absolute;
+  top: .6rem;
+  right: .7rem;
+  z-index: 2;
+  font-family: var(--font-mono);
+  font-size: .55rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--color-h2c);
+  background: color-mix(in srgb, var(--color-ink) 82%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+          backdrop-filter: blur(6px);
+  border: 1px solid var(--color-rule);
+  padding: .2rem .42rem;
+  border-radius: 999px;
+}
+
+.tc-top .rk b { color: var(--color-neon); font-weight: 500; }
+
+/* The number on the first seat is slightly brighter, the only thing that
+   now sets it apart. This is the same language the other cards use: the rank
+   is stated by the number. */
+.tc.lead .tc-top .rk { color: var(--color-bone); }
+
+/* The card header runs under the art, and the small glyph in it is no
+   longer needed: it is now in the art, at a large size. Two identical marks
+   side by side are noise. */
+.tc-top {
+  position: static;
+  gap: .4rem;
+}
+
+.tc-top .sv { display: none; }
+
+.tc-top b {
+  font-size: clamp(1.05rem, 2.4vw, 1.45rem);
+  letter-spacing: -.02em;
+}
+
+/* ---------- the price ---------- */
+.tc .nm { margin-top: -.25rem; font-size: .58rem; }
+
+.tc .pr {
+  font-size: .92rem;
+  color: var(--color-bone);
+  margin-top: .2rem;
+}
+
+.tc .ch { font-size: .66rem; }
+
+/* The sparkline is the only price history we have. It is pushed to the
+   bottom: the price and the change stay at the top, the footer stays at the
+   lower edge, and the emptiness gathers in one place instead of spreading
+   across the card. */
+.tc .spark {
+  height: 40px;
+  margin-top: auto;
+}
+
+/* ---------- the card footer ----------
+   Two figures, and they are deliberately of different weight.
+
+   Large is the depth: the liquidity of the pool is exactly what a seat in
+   the basket is given for, and it is also the only characteristic by which
+   the seats differ from one another. On a playing card an attack value would
+   stand in this place.
+
+   Small, and the same on all six, is the share. It is equal for everyone,
+   and the same number repeated six times says so louder than any bar. */
+.tc-foot {
+  padding-top: .6rem;
+  gap: .45rem;
+  align-items: flex-end;
+  font-size: .56rem;
+}
+
+.tc-foot .val {
+  color: var(--color-bone);
+  font-size: .95rem;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  margin-left: auto;
+}
+
+.tc-foot .val::before {
+  content: "depth";
+  display: block;
+  font-size: .5rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--color-dim);
+  margin-bottom: .1rem;
+}
+
+/* The share is the second figure, in the same shape as the depth. That way
+   they read as a pair: on the left what is the same for everyone, on the
+   right what the seats differ by.
+
+   The bar has been removed entirely. It filled to 16.67% of a track twenty
+   four pixels wide, that is, to four pixels, and looked like litter at the
+   lower edge. A bar is needed where lengths are compared; here there is
+   nothing to compare, all six are equal, and the same number repeated six
+   times says that better. The node is kept: app.js writes the width into
+   it. */
+.tc-foot .wbar {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  text-align: left;
+}
+
+.tc-foot .wbar .t { display: none; }
+
+.tc-foot .wbar::before {
+  content: "weight";
+  display: block;
+  font-size: .5rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--color-dim);
+  margin-bottom: .1rem;
+}
+
+.tc-foot .wbar em {
+  display: block;
+  width: auto;
+  text-align: left;
+  font-size: .95rem;
+  line-height: 1.1;
+  letter-spacing: -.01em;
+  color: var(--color-h2c);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- an empty seat ----------
+   Until the basket has been read the card does not disappear but honestly
+   says that it is loading. A missing card looks like "there are five of
+   them", and that is the first thing a person notices on a site with a six
+   in its name. */
+.tc.waiting .tc-top b,
+.tc.waiting .pr,
+.tc.waiting .ch,
+.tc.waiting .nm { color: var(--color-rule-2); }
+
+.tc.waiting .spark { opacity: .25; }
+.tc.waiting .tc-foot .val::before { opacity: .4; }
+
+/* =========================================================================
+   The mini cards in the breakdown under the calculator.
+
+   "Your slice, token by token" is the same basket as the six large cards
+   above, only about your own share. So the rows have to look like kin to
+   those cards rather than like rows of a table: a frame of their own, a
+   matrix of their own, a real coin icon.
+
+   The icon is placed by setRowIcon in app.js. Our mark lies underneath it
+   and stays visible if the image did not load.
+   ========================================================================= */
+
+.crow {
+  grid-template-columns: 2.1rem minmax(0, 1fr) 4.4rem 5rem;
+  gap: .7rem;
+  align-items: center;
+  padding: .5rem .7rem;
+  margin-bottom: .35rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 8px;
+  background-color: var(--color-ink);
+  transition: border-color .16s, transform .16s;
+}
+
+.crow:last-child { border-bottom: 1px solid var(--color-rule); margin-bottom: 0; }
+
+@media (hover: hover) {
+  .crow:hover {
+    border-color: color-mix(in srgb, var(--color-neon) 35%, var(--color-rule));
+    transform: translateX(2px);
+  }
+}
+
+/* The medallion of a row is the same rounded square as on the large cards,
+   only small. One shape at two sizes reads as one system rather than as two
+   different decisions. */
+.crow .sv {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 26%;
+  overflow: hidden;
+  background: var(--color-block-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-bone) 8%, transparent);
+  align-items: center;
+  justify-content: center;
+}
+
+.crow .sv svg { width: 58%; height: auto; }
+
+.crow .sv img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The mark hides only once the image has landed: an empty frame in place of
+   an icon looks like broken layout rather than like "there is no icon". */
+.crow .sv.has-icon svg { opacity: 0; }
+
+.crow b { font-size: .92rem; }
+.crow .q { font-size: .66rem; }
+.crow .d { font-size: .72rem; }
+
+@media (max-width: 520px) {
+  .crow { grid-template-columns: 1.8rem minmax(0, 1fr) 3.6rem 4.2rem; gap: .5rem; }
+  .crow .sv { width: 1.8rem; height: 1.8rem; }
+}
+
+/* =========================================================================
+   THE WINDOW WITH THE ICON, IN THE COLOUR OF THE TOKEN ITSELF
+
+   The window under the icon is painted in the colour of the token itself,
+   taken down into shadow. It is not written in and not stored: the
+   composition of the basket changes every three hours, so the colour is
+   measured off the icon at render time, and how exactly is written in
+   app.js. The lightness is set here rather than taken from the icon: next to
+   a dark card a glowing window would look like a hole.
+
+   That way the window reads as a separate object set into the card rather
+   than as a continuation of its surface.
+
+   Three classes in the selector, so the rule wins confidently on weight
+   against the general window rule above, and the order of the lines in the
+   file does not affect it.
+   ========================================================================= */
+.tc.has-tone .tc-art {
+  background-image:
+    /* Light from above, in the same colour only lighter: the window looks
+       lit rather than filled with paint. */
+    radial-gradient(118% 116% at 50% -6%,
+      var(--tone-hi) 0%, transparent 68%),
+    /* The shadow at the bottom gathers attention towards the icon. */
+    radial-gradient(128% 108% at 50% 104%,
+      color-mix(in srgb, #000 58%, transparent) 0%, transparent 62%);
+  background-color: var(--tone);
+  transition: background-color .35s ease;
+}
+
+/* The corner marks drown on a coloured background, so we lift them to bone. */
+.tc.has-tone .tc-art::after {
+  opacity: .55;
+  background-image:
+    linear-gradient(var(--color-bone) 0 0), linear-gradient(var(--color-bone) 0 0),
+    linear-gradient(var(--color-bone) 0 0), linear-gradient(var(--color-bone) 0 0),
+    linear-gradient(var(--color-bone) 0 0), linear-gradient(var(--color-bone) 0 0),
+    linear-gradient(var(--color-bone) 0 0), linear-gradient(var(--color-bone) 0 0);
+}
+
+
+/* =========================================================================
+   THE FOIL, THE DEFAULT LOOK OF THE CARDS
+
+   Made by taking apart the sources of usepackd.xyz rather than from an
+   impression of a screenshot. What is actually there:
+
+     .holo-frame  a 5 pixel frame, and all the beauty lives precisely in it:
+                  a conic gradient of light and dark facets, two opposing
+                  hatchings at plus and minus 45 degrees with a 3 pixel
+                  pitch, coloured patches in the accent, concentric rings and
+                  a dark base
+                  linear-gradient(135deg, #0C0F03, #000, #161A07, #000);
+     ::before     a travelling white highlight, 3.4 seconds, background-size
+                  260%;
+     ::after      a scatter of spark dots across the field of the frame;
+     .holo-inner  and the ground itself is JUST a dark radial gradient
+                  radial-gradient(120% 95% at 50% 0%, #16161d, #0a0a0e 58%,
+                  #000) plus two inner lights. No texture at all.
+
+   Hence the main conclusion, the one that made it worth going into the
+   source: their "beautiful background" is NOT a pattern on the ground. The
+   ground is almost black and empty. It is the frame that works. Any texture
+   on the field of a card argues with what is written on it, and that is
+   exactly how the engraving got in the way.
+
+   What was taken and what was not. The devices were taken: the foil frame,
+   the travelling highlight, the clean dark ground, the soft shadow under the
+   card. Their colours and gradients were not taken one to one: we have
+   fifteen themes and an accent of our own, so everything is built off
+   var(--color-neon). A copy of somebody else's palette would have fallen
+   apart at the very first change of theme.
+   ========================================================================= */
+
+/* ---------- the ground: clean, no pattern ----------
+
+   THIS BLOCK HAS GONE BACK AND FORTH. Do not touch it without working it out
+   first.
+
+   Originally it was written for a dark page: a gradient going into black and
+   an inner shadow at 55% black. When the site turned light for a day, that
+   gave not depth but a black rectangle across which the name of the token
+   was written in dark green letters: the measurement showed 2.21 on the
+   caption and 2.23 on the 24 hour change against a requirement of 4.5. So I
+   rewrote the card as a light one, "raised rather than cut out".
+
+   The site went back to dark, and the original version came back with it: on
+   dark it is right, while the light version would now give a light patch on
+   top of a dark page. The frame below is built for the same calculation.
+
+   The rule is simple: the ground of a card always follows FROM the ground of
+   the page, and the depth always goes in the same direction as the page's.
+   It is easy to mix up, and both times it was caught by measurement rather
+   than by eye. */
+.tc {
+  background-image:
+    radial-gradient(120% 95% at 50% 0%,
+      color-mix(in srgb, var(--color-block) 55%, var(--color-ink)) 0%,
+      var(--color-ink) 58%,
+      #000 100%);
+  background-color: var(--color-ink);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-bone) 14%, transparent),
+    inset 0 0 22px rgba(0, 0, 0, .55),
+    0 10px 26px -14px #000;
+}
+
+/* ---------- the frame ----------
+   A pseudo-element rather than a border: a border would have shifted the
+   content by two pixels and the whole grid would twitch on hover. An xor
+   mask cuts out the middle, and only the frame is left of the layer.
+
+   Two pixels wide rather than five like theirs: their card is 214 pixels
+   tall at a 5:7 ratio, while ours is wide and short, and a five pixel frame
+   on it reads as the wall of a box rather than the edge of a card. */
+.tc::after {
+  opacity: 1;                          /* always, not only on hover */
+  padding: 2px;
+  background:
+    /* 1. The travelling highlight. It is also the only layer that moves,
+          which is why it comes first: the background-position list is
+          animated, and the other layers are given a motionless 0 0. */
+    linear-gradient(115deg,
+      transparent 40%,
+      color-mix(in srgb, var(--color-bone) 55%, transparent) 50%,
+      transparent 60%),
+    /* 2. The facets of the foil. A conic gradient is what gives foil its
+          "turn towards the light": eight alternating light and dark sectors
+          around the centre. */
+    conic-gradient(from 45deg at 50% 50%,
+      rgba(255,255,255,.18) 0deg,  rgba(255,255,255,.02) 44deg,
+      rgba(0,0,0,.45) 46deg,       rgba(0,0,0,.05) 89deg,
+      rgba(255,255,255,.22) 91deg, rgba(255,255,255,.02) 134deg,
+      rgba(0,0,0,.40) 136deg,      rgba(0,0,0,.05) 179deg,
+      rgba(255,255,255,.14) 181deg,rgba(255,255,255,.02) 224deg,
+      rgba(0,0,0,.40) 226deg,      rgba(0,0,0,.05) 269deg,
+      rgba(255,255,255,.20) 271deg,rgba(255,255,255,.02) 314deg,
+      rgba(0,0,0,.42) 316deg,      rgba(0,0,0,.05) 360deg),
+    /* 3. Two opposing hatchings with a 3 pixel pitch. This is not a texture
+          of the field: it lives only inside the frame and reads as the
+          grain of metal. */
+    repeating-linear-gradient(45deg,
+      rgba(255,255,255,.14) 0 .6px, transparent .6px 3px,
+      rgba(0,0,0,.35) 3px 3.6px,    transparent 3.6px 6px),
+    repeating-linear-gradient(-45deg,
+      rgba(255,255,255,.12) 0 .6px, transparent .6px 3px,
+      rgba(0,0,0,.30) 3px 3.6px,    transparent 3.6px 6px),
+    /* 4. The coloured patches, here in the theme accent rather than their lime. */
+    radial-gradient(55% 40% at 18% 22%,
+      color-mix(in srgb, var(--color-neon) 30%, transparent), transparent 62%),
+    radial-gradient(50% 42% at 72% 78%,
+      color-mix(in srgb, var(--color-neon) 22%, transparent), transparent 60%),
+    /* 5. The concentric rings, diffraction on the foil. */
+    repeating-radial-gradient(circle at 50% 50%,
+      transparent 0 3.5px, rgba(255,255,255,.055) 3.5px 4px),
+    /* 6. The dark base: without it all the transparent layers would land on
+          the ground of the card and the frame would disappear. For the
+          light day the base was turned inside out into light metal, and it
+          came back together with the ground of the card. */
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--color-neon) 8%, #000) 0%,
+      #000 20%, #000 40%,
+      color-mix(in srgb, var(--color-neon) 14%, #000) 55%,
+      #000 72%, #000 88%,
+      color-mix(in srgb, var(--color-neon) 8%, #000) 100%);
+  background-size: 260% 100%, auto, auto, auto, auto, auto, auto, auto;
+  background-position: 130% 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0;
+  animation: tc-foil 3.4s ease-in-out infinite;
+}
+
+@keyframes tc-foil {
+  from { background-position: 130% 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to   { background-position: -30% 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+}
+
+/* Hover strengthens the frame rather than lighting it: it is already alight. */
+@media (hover: hover) {
+  .tc:hover::after { padding: 3px; }
+}
+
+/* The travelling highlight is motion. For anyone it bothers the frame stays
+   still, and the foil itself does not go anywhere. */
+@media (prefers-reduced-motion: reduce) {
+  .tc::after { animation: none; background-position: 50% 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+}
+
+/* ---------- the "your slice" breakdown: no texture ----------
+   The rows of the breakdown are a table, not objects. Texture makes a
+   surface, and a row has no surface: it has only alignment into columns.
+   What is left is an even tone and a line between the rows. */
+.crow {
+  background-image: none;
+  background-color: transparent;
+}
+
+.crow:hover {
+  background-color: color-mix(in srgb, var(--color-bone) 3%, transparent);
+}

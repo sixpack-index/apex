@@ -1,0 +1,798 @@
+/* =========================================================================
+   THE FIRST SCREEN WITH THE SCENE, THE PILL HEADER, THE SPLASH, TRANSITIONS
+
+   A separate file for the same reason as hero.css and cards.css: base.css is
+   somebody else's compiled CSS out of the archive and may not be edited
+   blind. This one is loaded last and overrides the header.
+
+   The scene used to live on a separate page at /hero, and that was a
+   mistake: there is one site, and the first screen is its top rather than a
+   neighbouring address. Here it is built so that it travels away with its
+   own screen instead of hanging as the background of the whole page.
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   THE FIRST SCREEN
+   ------------------------------------------------------------------------- */
+.hero3d {
+  position: relative;
+  min-height: 100lvh;
+  display: flex;
+  flex-direction: column;
+  padding-inline: var(--edge3d);
+  padding-bottom: var(--edge3d);
+  overflow: hidden;              /* the canvas draws across the whole window, we clip it to the section */
+  isolation: isolate;
+}
+
+/* =========================================================================
+   THE SIZES TRAVEL WITH THE WIDTH OF THE WINDOW
+
+   In the original brief the first screen is built entirely in rem, and the
+   root type size is tied to the width of the window, so that a layout drawn
+   at 1440 keeps its proportions on any screen. When the screen moved into
+   the shared index.html that rule was lost: rem went back to sixteen pixels,
+   and at 2560 the heading took 22% of the width instead of the intended 39%,
+   the text crawled off into the corners and the orb stayed huge. That is
+   visible only on a wide monitor, which is why it did not surface at once.
+
+   Bringing back the global html{font-size:1.111vw} is not possible: the rest
+   of the site is written in clamp() with vw and would be scaled TWICE. So
+   the sizes of the first screen are translated into the same clamp the whole
+   site uses. The middle values are chosen so that at 1440 they match the
+   layout to the pixel: 5vw of 1440 is exactly the 72px of the original
+   heading. */
+:root { --edge3d: clamp(1.25rem, 2.08vw, 3rem); }
+
+/* The canvas is ABSOLUTE rather than nailed to the screen. The difference
+   shows only while scrolling, and it matters: a fixed one would stay under
+   every section, and the text of each of them would lie on a moving picture.
+   An absolute one travels away with its own screen and hands the page over
+   clean. */
+.scene { position: absolute; inset: 0; z-index: 0; }
+.scene canvas { display: block; }
+
+/* The line under the bottom bar sits below the canvas, so the orb and the
+   hands pass in front of it. On a narrow screen the bottom bar folds into a
+   column, and the line has nothing to line up with. */
+.hero3d .rule3d {
+  position: absolute;
+  left: var(--edge3d); right: var(--edge3d);
+  bottom: clamp(12rem, 17.5vw, 24rem); height: 1px;
+  background: var(--color-rule);
+  z-index: 0; pointer-events: none;
+}
+@media (max-width: 767.98px) { .hero3d .rule3d { display: none } }
+
+/* =========================================================================
+   THE GROUND UNDER THE TEXT
+
+   The scene glows and it MOVES. A measurement over a frame with the text
+   hidden found places where the brightness of the background matches the
+   brightness of the letters exactly, and the letters there are not "pale"
+   but disappearing and reappearing.
+
+   On the first pass I dimmed everything in sight: I lowered the reflection
+   on the hands from 2.25 to 1.40, the light from 6 to 3.2, and laid a dense
+   fill along the bottom. The text became readable and the hands vanished.
+   Alexander asked where I had put them, and he was right. Dimming the object
+   for the sake of the caption under it is not a solution.
+
+   Now it is the other way around: the light is fully returned to the hands,
+   and the ground holds exactly the bands where the letters stand and is
+   weakened where the hands stand. The lower palm lives in the right half of
+   the frame, so the left band is denser than the right one.
+   ========================================================================= */
+.scrim {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    /* bottom left: the description and the buttons, the hands do not reach here */
+    radial-gradient(46% 26% at 16% 92%,
+      rgba(20,26,18,.88) 0%, rgba(20,26,18,.42) 58%, rgba(20,26,18,0) 100%),
+    /* bottom right: the eyebrow and the metrics; weaker, so that the palm survives */
+    radial-gradient(38% 30% at 86% 84%,
+      rgba(20,26,18,.72) 0%, rgba(20,26,18,.34) 56%, rgba(20,26,18,0) 100%),
+    /* the heading at the top left */
+    radial-gradient(52% 34% at 6% 14%,
+      rgba(20,26,18,.66) 0%, rgba(20,26,18,0) 74%),
+    /* the very bottom: the seam with the next section, so the frame does not break off */
+    linear-gradient(to top,
+      rgba(20,26,18,.62) 0%, rgba(20,26,18,.20) 10%, rgba(20,26,18,0) 22%);
+}
+
+/* On a phone the text takes up almost the whole screen: the layout folds
+   into a column, and there is hardly any free space where the scene is seen
+   on its own. Here the ground is even, and the scene works as a background
+   rather than as a neighbour. */
+@media (max-width: 767.98px) {
+  .scrim {
+    background:
+      linear-gradient(to top,
+        rgba(20,26,18,.88) 0%, rgba(20,26,18,.76) 34%,
+        rgba(20,26,18,.54) 62%, rgba(20,26,18,.32) 88%, rgba(20,26,18,.24) 100%);
+  }
+}
+
+/* A SHADOW UNDER THE LETTERS. The ground removes most of the trouble but
+   not all of it: a handful of highlights remain, and they travel across the
+   frame as well. The shadow darkens only what is right up against a letter,
+   and on a dark background it is not visible at all. The radius is in rem,
+   so it travels with the type size rather than drifting away from it. */
+.hero3d h1, .hero3d .desc3d, .hero3d .eyebrow3d,
+.hero3d .stat3d dd, .hero3d .stat3d dt, .hero3d .btn-link3d {
+  text-shadow: 0 0 .6rem rgba(20,26,18,.92), 0 .06rem .2rem rgba(20,26,18,.78);
+}
+
+/* -------------------------------------------------------------------------
+   THE CONTENT OF THE FIRST SCREEN
+   ------------------------------------------------------------------------- */
+.hero3d-in {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; flex: 1;
+}
+
+.hero3d h1 {
+  margin-top: clamp(5rem, 6.6vw, 9rem); max-width: clamp(20rem, 39vw, 52rem);
+  font-family: var(--font-disp);
+  font-size: var(--fs-hero3d);
+  font-weight: 300; font-stretch: 88%;
+  line-height: 1; letter-spacing: -.02em;
+  text-transform: none;                   /* base.css raises h1 to uppercase */
+  color: var(--color-bone);
+}
+:root { --fs-hero3d: clamp(2.75rem, 5vw, 7.5rem) }
+
+/* The words are wrapped separately, otherwise the line would break at any
+   letter: each one is inline-block, and the browser is free to break
+   anywhere. */
+.hero3d h1 .wd { display: inline-block; white-space: nowrap }
+.hero3d h1 .ltr {
+  display: inline-block; opacity: 0; filter: blur(12px);
+  transition: opacity .8s var(--ease3d), filter .8s var(--ease3d);
+}
+.hero3d h1.on .ltr { opacity: 1; filter: blur(0) }
+:root { --ease3d: cubic-bezier(.2,.8,.2,1) }
+
+.band3d { margin-top: auto; padding-top: clamp(3rem, 4.4vw, 6rem); display: flex; flex-direction: column; gap: 3rem }
+@media (min-width: 768px) {
+  .band3d { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 2rem }
+}
+
+.col3d-l { max-width: clamp(18rem, 26.6vw, 34rem) }
+.desc3d { font-family: var(--font-mono); font-size: clamp(.72rem, .9vw, 1.06rem); line-height: 1.7; color: var(--color-mute) }
+.acts3d { margin-top: 2rem; display: flex; flex-wrap: wrap; align-items: center; column-gap: 2rem; row-gap: 1rem }
+@media (min-width: 768px) { .acts3d { margin-top: 3rem } }
+
+.btn-fill3d {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
+  background: var(--color-bone); color: var(--color-ink);
+  border-radius: .75rem; padding: .8rem 2rem; font-size: clamp(.6rem, .71vw, .84rem);
+  transition: background .18s;
+}
+.btn-fill3d:hover { background: var(--color-neon-hi) }
+.btn-link3d {
+  font-family: var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--color-mute); text-decoration: underline; text-underline-offset: 4px;
+  font-size: clamp(.6rem, .71vw, .84rem); transition: color .18s;
+}
+.btn-link3d:hover { color: var(--color-bone) }
+
+.col3d-r { display: flex; flex-direction: column }
+/* The eyebrow and the metric captions are one step lighter than the other
+   captions, and this is not about taste. They are the only small text
+   standing over the right palm, and that palm is the most lit thing in the
+   frame: measured over the letters it gave 3.87 and 4.61 against a
+   requirement of 4.5. Pressing the ground harder would have meant dimming
+   the hand again, so the text itself was lifted. On dark that costs nothing,
+   and the step down to the metric figures still stays at a factor of
+   two. */
+.eyebrow3d {
+  font-family: var(--font-mono); margin-bottom: 2rem;
+  font-size: clamp(.56rem, .67vw, .8rem); text-transform: uppercase; letter-spacing: .15em; color: var(--color-h2c);
+}
+@media (min-width: 768px) { .eyebrow3d { margin-bottom: 4rem } }
+
+.stats3d { display: grid; grid-template-columns: repeat(2,1fr); gap: 2rem }
+@media (min-width: 768px) { .stats3d { gap: 3rem } }
+.stat3d { border-left: 1px solid var(--color-rule-2); padding-left: 1rem }
+.stat3d dd {
+  font-family: var(--font-disp); font-size: clamp(1.75rem, 2.22vw, 3.3rem); font-weight: 300; font-stretch: 88%;
+  line-height: 1; color: var(--color-bone);
+}
+.stat3d dt { margin-top: .75rem; font-family: var(--font-mono); font-size: clamp(.58rem, .69vw, .82rem); color: var(--color-h2c) }
+
+/* -------------------------------------------------------------------------
+   THE HEADER: THREE PILLS
+
+   Overrides .nav from base.css. The bar itself becomes transparent: the
+   glass lives on the pills, and a second ground under them would read as a
+   stripe across the scene.
+   ------------------------------------------------------------------------- */
+/* THE HEADER IS TAKEN OUT OF THE FLOW: fixed, not sticky.
+
+   As sticky it occupied its own height in the flow, and the first screen
+   began UNDER it: 100lvh plus sixty eight pixels of header do not fit in the
+   window, and the bottom row of metrics went off the edge. That was visible
+   only on a full-page screenshot, in the markup everything looked right.
+
+   A floating header occupies nothing, the screen gets the whole window, and
+   the glass on the pills themselves blurs whatever passes underneath. */
+.nav {
+  position: fixed !important;
+  inset-inline: 0; top: 0;
+  background: none !important;
+  border-bottom: 0 !important;
+  -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+  padding: .5rem;
+}
+.nav .nav-in {
+  max-width: none; margin: 0; padding-inline: 0;
+  height: auto; align-items: stretch; gap: .5rem; position: relative;
+}
+
+/* The old three pills (.pill3d / .brandpill / .navpill / .sp3d) were removed
+   together with the markup: their place was taken by the new-era rank
+   further down the file. */
+.drop3d a.here { color: var(--color-neon) }
+
+/* A spacer. Below 900 the pill with the links hides, and without the spacer
+   the burger and the wallet would stick to the mark on the left. The spacer
+   occupies the same place the pill did, and everything on the right stays on
+   the right. */
+.sp3d { flex: 1; display: none }
+@media (max-width: 900px) { .sp3d { display: block } }
+
+/* The wallet is the same pill, so that the button does not fall out of the row. */
+.nav .wl { flex: none }
+.nav .wl .connect {
+  border-radius: .75rem; padding: .85rem 1.4rem;
+  border-color: var(--color-rule-2); color: var(--color-mute);
+  background: rgba(220,224,198,.05);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  height: 100%;
+}
+.nav .wl .connect:hover { background: var(--color-neon); color: var(--color-ink); border-color: var(--color-neon) }
+@media (max-width: 560px) { .nav .wl { display: none } }
+
+/* The link to X is a glyph rather than a word: the project has one channel,
+   and it is recognised by its mark. The green dot means the channel is
+   alive. */
+.xpill {
+  display: flex; align-items: center; gap: .5rem; flex: none;
+  border: 1px solid var(--color-rule-2); background: var(--color-ink);
+  border-radius: .75rem; padding: .85rem 1.4rem;
+  color: var(--color-bone); transition: border-color .18s, color .18s;
+}
+.xpill svg { width: 1rem; height: 1rem; display: block }
+.xpill:hover, .xpill.blink { border-color: var(--color-neon); color: var(--color-neon) }
+.dot3d { width: .375rem; height: .375rem; border-radius: 50%; background: #4ade80; opacity: .3 }
+.dot3d.beat { animation: beat3d 2400ms ease-in-out infinite }
+@keyframes beat3d { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
+
+/* the burger and the dropdown menu */
+.burger3d {
+  display: none; align-items: center; justify-content: center;
+  padding-inline: 1.1rem; cursor: pointer; background: rgba(220,224,198,.05);
+  border: 1px solid var(--color-rule-2); border-radius: .75rem; flex: none;
+}
+@media (max-width: 900px) { .burger3d { display: flex } }
+.burger3d span { position: relative; display: block; width: 1.15rem; height: 1rem }
+.burger3d i {
+  position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--color-bone);
+  transition: transform .35s cubic-bezier(.2,1.2,.3,1);
+}
+.burger3d i:nth-child(1) { transform: translateY(-.1875rem) }
+.burger3d i:nth-child(2) { transform: translateY(.1875rem) }
+.burger3d[aria-expanded="true"] i:nth-child(1) { transform: translateY(0) rotate(45deg) }
+.burger3d[aria-expanded="true"] i:nth-child(2) { transform: translateY(0) rotate(-45deg) }
+
+.drop3d {
+  position: absolute; inset-inline: 0; top: 100%; margin-top: .5rem; padding: .5rem;
+  border: 1px solid var(--color-rule-2); border-radius: .75rem;
+  background: color-mix(in srgb, var(--color-ink) 82%, transparent);
+  -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
+  opacity: 0; transform: translateY(-.5rem); pointer-events: none; z-index: 50;
+  transition: opacity .3s var(--ease3d), transform .3s var(--ease3d);
+}
+.drop3d.open { opacity: 1; transform: none; pointer-events: auto }
+@media (min-width: 901px) { .drop3d { display: none } }
+.drop3d a {
+  display: block; padding: .9rem .75rem; color: var(--color-mute);
+  border-top: 1px solid var(--color-rule);
+  font-family: var(--font-mono); letter-spacing: .12em; text-transform: uppercase; font-size: .66rem;
+}
+.drop3d li:first-child a { border-top: 0 }
+
+/* -------------------------------------------------------------------------
+   THE SPLASH
+
+   IT WAS A LIGHT SHEET, IT BECAME A WARP. The previous splash was left over
+   from the version of the site with a white background: a #EDEFDC sheet
+   across the whole screen and a pill a third of the window tall with a
+   percentage inside. On a dark site it read as a flash in the eyes right
+   before showing a dark page.
+
+   Now it is the same strokes that open the film: dots flying out from the
+   centre, stretched by speed. The count is carried by a thin bar rather than
+   by an object across the whole screen, because a splash is waiting, not a
+   stage.
+
+   The canvas is drawn in intro.js, as an ordinary script rather than a
+   module. The scene of the first screen comes from somebody else's CDN, and
+   if it does not answer the module will not run at all, while the splash has
+   to go away in any case.
+   ------------------------------------------------------------------------- */
+.pl { position: fixed; inset: 0; z-index: 60; overflow: hidden }
+.pl-sheet { position: absolute; inset: 0; overflow: hidden; background: #07090A; transform: translateY(0) }
+.pl-warp { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+.pl-hold {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: clamp(1rem, 2.2vw, 1.6rem);
+}
+/* A darkening under the captions. The warp converges exactly on the middle
+   of the frame, the same place the name stands, and on a screenshot of the
+   live site the strokes ran straight through the letters. The patch is soft
+   and has no edge: a hard ground would read as a plate, and there should not
+   be one here. */
+.pl-hold::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(38% 30% at 50% 50%,
+    rgba(7,9,10,.92) 0%, rgba(7,9,10,.72) 45%, rgba(7,9,10,0) 100%);
+}
+.pl-mark, .pl-bar, .pl-num { position: relative }
+.pl-mark {
+  font-family: var(--font-disp); font-weight: 900; font-stretch: 80%; font-style: italic;
+  text-transform: uppercase; letter-spacing: -.05em; color: var(--color-bone);
+  font-size: clamp(1.5rem, 3.4vw, 2.6rem); line-height: 1;
+}
+.pl-mark i { color: var(--color-neon); font-style: italic }
+/* A bar one pixel tall. A thick bar on an empty screen becomes an object
+   people watch, and that makes the waiting feel longer. */
+.pl-bar { position: relative; display: block; width: min(46vw, 22rem); height: 1px; background: #22301F }
+.pl-fill { position: absolute; inset-block: 0; left: 0; width: 0%; background: var(--color-neon); display: block }
+.pl-num {
+  font-family: var(--font-mono); font-size: .62rem; letter-spacing: .28em;
+  color: var(--color-mute); font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------------------
+   APPEARANCES
+
+   .rv is the entrance after the splash, on a schedule.
+   .sr is a section coming through as you scroll towards it.
+   ------------------------------------------------------------------------- */
+.rv { opacity: 0; transform: translateY(1.25rem);
+  transition: opacity .8s var(--ease3d), transform .8s var(--ease3d) }
+.rv.on { opacity: 1; transform: none }
+.rv-hdr { opacity: 0; transform: translateY(-.75rem);
+  transition: opacity .7s var(--ease3d), transform .7s var(--ease3d) }
+.rv-hdr.on { opacity: 1; transform: none }
+
+/* Scrolling. The offset is small on purpose: a long "fly in from below" on
+   a page with many sections turns reading into waiting. */
+.sr { opacity: 0; transform: translateY(1.6rem);
+  transition: opacity .7s var(--ease3d), transform .7s var(--ease3d) }
+.sr.on { opacity: 1; transform: none }
+
+@media (prefers-reduced-motion: reduce) {
+  .rv, .rv-hdr, .sr { opacity: 1 !important; transform: none !important; transition: none !important }
+  .hero3d h1 .ltr { opacity: 1; filter: none; transition: none }
+  .pl { display: none }
+  .dot3d.beat { animation: none; opacity: 1 }
+}
+
+
+/* -------------------------------------------------------------------------
+   ANCHORS UNDER THE STICKY HEADER
+
+   The menu jumps between sections of the same page, and the header is
+   sticky: without a scroll margin the heading of a section ends up exactly
+   underneath it and looks skipped. The amount is the height of the pills
+   plus the margin.
+   ------------------------------------------------------------------------- */
+#calc, #basket, #ledger { scroll-margin-top: 5.2rem }
+
+/* And the same for pages WITHOUT a first screen.
+
+   The header became floating, and /docs starts straight with a heading,
+   which went under the pills and was clipped at the top. On the front page
+   this is invisible: there the first screen fills the window under the
+   header, and its content starts with a margin of its own. Measured: the
+   header is 72 pixels tall on a wide screen and 69 on a phone, and the top
+   of the heading stood at 41 and 25. */
+.docs { padding-top: 4.6rem }
+@media (max-width: 640px) { .docs { padding-top: 4.2rem } }
+html { scroll-behavior: smooth }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }
+
+
+/* =========================================================================
+   THE BOTTOM OF THE PAGE
+
+   It read as "nothing is clear", and there were four different reasons for
+   that rather than one.
+   ========================================================================= */
+
+/* ---------- 1. The footer ----------
+   In the footer grid the first cell was an EMPTY div. Three columns, four
+   children: "registry" and "reading" landed in the second and third, and
+   "follow" wrapped onto a new line under the empty space. The result was a
+   hole at the top left and an orphaned column at the bottom.
+
+   Now the first cell is occupied by what it should be: the mark, the promise
+   and a line about what this is. Four columns, all in one row. */
+.foot .fg { grid-template-columns: 1fr; gap: 2rem 1.6rem }
+@media (min-width: 640px) { .foot .fg { grid-template-columns: 1fr 1fr } }
+@media (min-width: 960px) { .foot .fg { grid-template-columns: 1.7fr 1fr 1fr 1fr } }
+@media (min-width: 640px) { .fg-brand { grid-column: 1 / -1 } }
+@media (min-width: 960px) { .fg-brand { grid-column: auto } }
+
+.fg-mark { display: inline-flex; align-items: center; gap: .6rem }
+.fg-mark img { height: 1.7rem; width: auto; flex: none }
+.fg-say {
+  margin-top: 1.1rem; font-family: var(--font-disp);
+  font-size: 1.15rem; font-weight: 300; font-stretch: 88%;
+  letter-spacing: -.02em; color: var(--color-bone);
+}
+.fg-sub {
+  margin-top: .7rem; max-width: 30ch;
+  font-family: var(--font-mono); font-size: .62rem; line-height: 1.8; color: var(--color-mute);
+}
+.fg-note {
+  margin-top: 1.1rem; font-family: var(--font-mono);
+  font-size: .55rem; letter-spacing: .16em; text-transform: uppercase; color: var(--color-dim);
+}
+
+/* ---------- 2. The dashes ----------
+   While there is no token almost every number on the page is a dash, and
+   that is right: they may not be invented. But a dash set at three
+   centimetres reads not as "there is no data yet" but as "a stripe instead
+   of a digit": eight of them in a row in the summary looked like broken
+   layout.
+
+   Now a place without data has a look of its own, a small monospace in the
+   rule tone. The caption under it explains in words anyway: "no token
+   deployed", "not trading yet". The class is put on by app.js after every
+   render. */
+.na {
+  font-family: var(--font-mono) !important;
+  font-size: .68rem !important;
+  font-weight: 400 !important;
+  letter-spacing: .18em !important;
+  color: var(--color-rule-2) !important;
+  font-stretch: normal !important;
+}
+
+/* ---------- 3. The ledger ----------
+   The section consists of one note in the corner and one and a half screens
+   of emptiness to the right. While there are no epochs it has nothing to
+   show, but the emptiness has to look intentional rather than forgotten. The
+   note moves to the centre and gets air above and below it. */
+.ledger-empty {
+  margin: 2.2rem auto 2.6rem;
+  max-width: 58ch;
+  text-align: left;
+  padding: 1.4rem 1.6rem;
+}
+
+/* A clock instead of an explanation.
+
+   The paragraph answered "why is it empty here", while what people ask is
+   "when". The clock answers that and at the same time proves the page is
+   alive: the digits tick, so somebody is running it.
+
+   The digits are set in the same weight and at the same size as the counter
+   in the summary, because it is one and the same time and it has to look the
+   same. The character width is fixed (tabular-nums is inherited from body),
+   otherwise the line twitches on every second. */
+.ledger-wait {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: .55rem;
+  max-width: 46ch;
+  padding: 1.8rem 1.6rem 1.9rem;
+}
+.ledger-wait .lw-k {
+  font-family: var(--font-mono);
+  font-size: .56rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--color-mute);
+}
+.ledger-wait .lw-t {
+  font-family: var(--font-disp);
+  font-weight: 900;
+  font-stretch: 76%;
+  letter-spacing: -.055em;
+  font-size: clamp(2.6rem, 8vw, 4.2rem);
+  line-height: 1;
+  color: var(--color-neon);
+}
+.ledger-wait .lw-s {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 300;
+  line-height: 1.7;
+  color: var(--color-h2c);
+  max-width: 42ch;
+}
+.ledger-wait .lw-s b { color: var(--color-bone); font-weight: 500 }
+
+/* ---------- 4. The glass of the header ----------
+   The floating header blurred whatever travelled underneath it, but at a
+   five per cent fill light pieces came through it distinctly: the tops of
+   the cards and the green plates of the sections crawled across the pills as
+   patches. The fill now follows from the ground of the page: under the glass
+   you can see movement, but you cannot see WHAT exactly is moving. */
+.ne-pill, .nav .wl .connect, .burger3d {
+  background: color-mix(in srgb, var(--color-ink) 78%, transparent);
+}
+.xpill { background: color-mix(in srgb, var(--color-ink) 88%, transparent) }
+
+/* There are gaps between the pills, and the content of the page travels
+   through them completely uncovered: pieces of other lines could be read
+   under the header. The density of the pills themselves does not help here,
+   because the holes are not in them but BETWEEN them. So behind the whole
+   bar there is a short gradient from the page colour: whatever travels
+   upwards dissolves before it reaches the header, while the header itself
+   stays segmented, as intended. */
+.nav::before {
+  content: "";
+  position: absolute; inset: 0 0 auto; height: calc(100% + 1.6rem);
+  background: linear-gradient(to bottom,
+    var(--color-ink) 0%,
+    color-mix(in srgb, var(--color-ink) 88%, transparent) 46%,
+    color-mix(in srgb, var(--color-ink) 40%, transparent) 76%,
+    transparent 100%);
+  pointer-events: none; z-index: -1;
+}
+
+
+/* The gradient behind the bar is left over from the three pills, but it is
+   needed here too: in the new-era rank there is even more open space between
+   the plate, the links and the button, and without it pieces of the
+   departing lines can be read under the header. */
+
+/* -------------------------------------------------------------------------
+   THE HEADER AFTER NEW-ERA
+
+   The three pills are replaced by their arrangement: a plate on the left,
+   links with no ground in the middle, a glass button on the right. The
+   values are taken from the source (`ui/eyebrow.tsx`,
+   `ui/glass-button.tsx`, `app/globals.css`), only the tones are changed:
+   theirs is white on blue, ours is bone on green.
+
+   The ring on the plate is `animated-gradient-border.tsx`: a gradient two
+   frames wide travels by `background-position` over three seconds, and
+   everything except a one pixel thread is cut out by
+   `mask-composite: exclude`. They drove it with a react-spring spring, here
+   it is ordinary keyframes: one property is animated, and there is no point
+   erecting a scheduler for it.
+   ------------------------------------------------------------------------- */
+.ne-row { align-items: center; gap: .6rem }
+
+.ne-pill {
+  position: relative; display: inline-flex; align-items: center; gap: .5rem; flex: none;
+  border-radius: 9999px; background: rgba(220,224,198,.04);
+  padding: .625rem 1.25rem;
+  font-family: var(--font-mono); font-size: clamp(.56rem, .67vw, .8rem);
+  letter-spacing: .14em; text-transform: uppercase; color: var(--color-bone);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0,0,0,.2);
+}
+.ne-pill img { height: 1.05rem; width: auto; flex: none; position: relative }
+.ne-ring {
+  position: absolute; inset: 0; padding: 1px; border-radius: 9999px;
+  background-image: linear-gradient(90deg,
+    rgba(220,224,198,.08), rgba(220,224,198,.42), rgba(220,224,198,.08));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; animation: ne-ring 3s linear infinite;
+}
+@keyframes ne-ring { from { background-position: 0% 0 } to { background-position: 200% 0 } }
+
+.ne-nav { flex: 1; display: flex; justify-content: center; gap: clamp(1.2rem, 3.4vw, 3rem) }
+@media (max-width: 900px) { .ne-nav { display: none } }
+.ne-nav a {
+  font-family: var(--font-mono); font-size: clamp(.56rem, .67vw, .8rem);
+  letter-spacing: .14em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-bone) 55%, transparent);
+  transition: color .18s; white-space: nowrap;
+}
+.ne-nav a:hover { color: var(--color-bone) }
+.ne-nav a.here { color: var(--color-neon) }
+
+/* The wallet button: four layers of inner shadow from `glass-button.tsx`.
+   The highlight on top and the shadow at the bottom together give a convexity
+   a flat fill never has, and that is the only reason there are four of
+   them. */
+.nav .wl .ne-btn {
+  position: relative; display: inline-flex; align-items: center; gap: .75rem;
+  height: 2.75rem; border-radius: 9999px; padding: 0 1.4rem;
+  /* The border is removed deliberately. `.connect` from base.css arrives
+     with a one pixel neon outline, and on top of a glass fill it read as the
+     contour of a different button: in new-era the glass is held by shadows
+     rather than by an outline. `border: 0` is mandatory here, otherwise the
+     base rule brings it back. */
+  border: 0;
+  font-family: var(--font-mono); font-size: clamp(.56rem, .67vw, .8rem);
+  letter-spacing: .14em; text-transform: uppercase; color: var(--color-bone);
+  background: rgba(20,25,18,.4);
+  -webkit-backdrop-filter: blur(20px) saturate(150%); backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: inset 0 2px 10px rgba(220,224,198,.35), inset 0 -6px 16px rgba(0,0,0,.75),
+              inset 0 0 0 1px rgba(220,224,198,.05), 0 8px 24px rgba(0,0,0,.4);
+}
+.nav .wl .ne-btn:hover {
+  background: rgba(30,38,26,.5); color: var(--color-bone);
+  box-shadow: inset 0 3px 14px rgba(220,224,198,.45), inset 0 -6px 16px rgba(0,0,0,.85),
+              inset 0 0 0 1px rgba(220,224,198,.1), 0 12px 32px rgba(0,0,0,.6);
+}
+.nav .wl .ne-btn i {
+  width: 4px; height: 4px; border-radius: 50%; flex: none;
+  background: var(--color-neon); animation: 2s infinite bl;
+}
+.nav .wl .ne-btn:hover i { background: var(--color-neon-hi) }
+/* The little circle for the arrow from glass-button.tsx is not here, and
+   that is not an oversight. `wallet.js` redraws the button whole on every
+   change of state (connecting, wrong network, address), so the circle would
+   live until the first update while the right padding for it would stay
+   forever: the label slid to the left and the button read as crooked. The
+   padding is symmetric. */
+
+/* -------------------------------------------------------------------------
+   THE FIELD OF DOTS UNDER THE LEDGER
+
+   The new-era wave, slowed from two seconds to twenty. Their scene ran on
+   three.js across the whole screen; here it is a 2D canvas for one section,
+   because raising WebGL for the sake of a background under a table costs more
+   than it is worth.
+
+   The canvas does not compute frames while the section is off screen: the
+   ledger is at the bottom of the page, and a person may never reach it at
+   all.
+   ------------------------------------------------------------------------- */
+.ledger-field { position: relative; isolation: isolate }
+.field-cv {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; z-index: -1; pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) { .field-cv { display: none } }
+
+/* -------------------------------------------------------------------------
+   AN EVEN ROW IN THE HEADER
+
+   After the move to the new-era arrangement the row drifted: the plate became
+   round while X and the wallet stayed rectangles with the .75rem rounding of
+   the old pills, and the heights of all four objects were computed from their
+   own padding rather than from a shared measure. On a screenshot that reads
+   as "the buttons are crooked", and so they are: four different heights do
+   not line up.
+
+   The shared measure of 2.75rem (44px) is taken from new-era's
+   glass-button.tsx: all of their controls are the same height, and the row is
+   held by that rather than by padding.
+   ------------------------------------------------------------------------- */
+.nav .nav-in { align-items: center }
+/* The burger is DELIBERATELY absent from the shared rule. It hides by a
+   `display: none` media query below 900 pixels, and a shared
+   `display: inline-flex` with no media query overrode that: on a wide screen
+   three little bars hung next to the menu. All it gets here is the measure
+   and the shape. */
+.ne-pill, .xpill, .nav .wl .connect {
+  height: 2.75rem; border-radius: 9999px; padding-block: 0;
+  display: inline-flex; align-items: center; flex: none;
+}
+.burger3d { height: 2.75rem; border-radius: 9999px; padding-block: 0; align-items: center }
+.ne-pill { padding-inline: 1.25rem }
+.xpill { padding-inline: 1.1rem; gap: .5rem; border-color: var(--color-rule-2) }
+.nav .wl .connect { padding: 0 1.4rem }
+.burger3d { width: 2.75rem; padding-inline: 0; justify-content: center }
+@media (max-width: 900px) { .burger3d { display: inline-flex; justify-content: center } }
+
+/* -------------------------------------------------------------------------
+   PANELS AFTER NEW-ERA (3B)
+
+   The butt-jointed grid is replaced by their `dna-card`: radius 24, padding
+   40, fill rgba(10,14,9,.55), blur 16, shadow 0 8px 32px, a border at 15%
+   bone. The number is filled with a gradient over the text, like their
+   statistics, but the typeface is ours.
+
+   UNDER GLASS THERE HAS TO BE A SCENE. Their cards flew in front of a glowing
+   DNA strand, and the whole point of glass is that something is visible
+   through it. On a flat background such a card becomes a grey rectangle, so a
+   soft green gradient lies under the row: without it the effect does not work
+   at all.
+   ------------------------------------------------------------------------- */
+.kpis {
+  background: none; border: 0; gap: clamp(.6rem, 1.4vw, 1rem);
+  padding: clamp(1rem, 2.4vw, 1.8rem) var(--spacing-gut);
+  position: relative; isolation: isolate;
+}
+.kpis::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60% 120% at 18% 0%, rgba(163,177,129,.14), transparent 62%),
+    radial-gradient(50% 120% at 82% 100%, rgba(163,177,129,.10), transparent 60%);
+}
+.kpi {
+  background: rgba(10,14,9,.55); border: 1px solid rgba(220,224,198,.15);
+  border-radius: 24px; padding: clamp(1.2rem, 2.6vw, 2rem) clamp(1rem, 2vw, 1.5rem);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0,0,0,.2);
+}
+.kpi .k { color: color-mix(in srgb, var(--color-bone) 75%, transparent) }
+.kpi .v {
+  background-image: linear-gradient(90deg, var(--color-neon), var(--color-bone));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* The green accent on the number is no longer needed: the gradient fill
+   picks it out more strongly anyway, and two emphases in a row cancel each
+   other out. */
+.kpi .v.g { color: transparent }
+
+/* -------------------------------------------------------------------------
+   THE TUNNEL UNDER THE TEN (4.2)
+
+   The warp from the splash, slowed fourfold and dimmed to a quarter of its
+   brightness. The basket cards go on top and stay the main thing: a
+   background that argues with the content stops being a background.
+   ------------------------------------------------------------------------- */
+.basket-tunnel { position: relative; isolation: isolate }
+
+/* THERE IS NO GROUND UNDER THE TUNNEL, AND THAT MATTERS.
+
+   The first attempt at making the strokes noticeable put an almost black
+   window under the section and took the lines towards bone. They became
+   visible, but at the cost of a single gamut: the whole site is on one green
+   scale, and the section dropped out of it as an alien dark rectangle with
+   whitish lines.
+
+   Visibility is given not by a different colour but by the same green at full
+   strength. The difference in lightness between the neon (#A3B181) and the
+   ground of the page (#141A12) is enormous and more than enough: what was
+   missing was opacity (the strokes ran at 6 to 28 per cent) and room (the
+   mask ate the sides, where there are no cards and where the tunnel is the
+   only thing visible). Both have been fixed. */
+.tunnel-cv {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; z-index: -1; pointer-events: none;
+  -webkit-mask-image: radial-gradient(110% 100% at 50% 45%, #000 0%, #000 62%, transparent 100%);
+          mask-image: radial-gradient(110% 100% at 50% 45%, #000 0%, #000 62%, transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) { 
+/* -------------------------------------------------------------------------
+   THE TRAVELLING BORDER ON THE BUY BUTTON (4.4)
+
+   The new-era device: a gradient two frames wide travels around the ring over
+   three seconds, and everything except the thread is cut out by a mask. There
+   is one buy button on the whole site, and it is the only place where such
+   motion is justified: on everything else it would turn into flickering.
+
+   The button is dark rather than filled with green. The first attempt was the
+   other way around, and on a light fill the bone thread disappeared
+   completely.
+   ------------------------------------------------------------------------- */
+.acts .btn.buy {
+  position: relative; overflow: hidden; border: 0;
+  background: rgba(20,25,18,.92); color: var(--color-bone);
+  border-radius: 9999px; padding: .85rem 1.7rem;
+}
+.acts .btn.buy::after {
+  content: ""; position: absolute; inset: 0; padding: 2px; border-radius: 9999px;
+  background-image: linear-gradient(90deg,
+    rgba(163,177,129,0) 0%, rgba(163,177,129,.35) 35%,
+    rgba(220,224,198,1) 50%, rgba(163,177,129,.35) 65%, rgba(163,177,129,0) 100%);
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; animation: ne-ring 3s linear infinite;
+}
+.acts .btn.buy:hover { background: rgba(30,38,26,.96); color: var(--color-bone) }

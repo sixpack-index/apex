@@ -1,0 +1,19 @@
+node_modules/
+.vercel/
+.DS_Store
+.env
+
+# Drafts and check pages: they live only for the duration of the work and
+# are not part of the storefront. We keep them nearby but not in the
+# repository, otherwise one day they ship to the live site along with the
+# useful things.
+icon-test.html
+marks-preview.html
+try/
+
+# working files for generating the mark
+pack-cut.png
+_logo.html
+_brand.html
+tools/mm-screen.png
+tools/mm-steps/

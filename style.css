@@ -1,0 +1,800 @@
+/* =========================================================================
+   APEX, the style. Five palettes, one layout.
+   Every colour is declared in every theme. A theme that overrides only half
+   of the tokens leaves an orphan from the previous one, and that is found
+   not by eye but a month later and in production.
+   ========================================================================= */
+
+/* ---------- 1. PAPER: a paper bulletin ---------- */
+:root,
+:root[data-theme="paper"] {
+  --bg:        #f2ede1;
+  --panel:     #e9e1cf;
+  --panel-2:   #ddd3bd;
+  --ink:       #17140d;
+  --muted:     #6b6355;
+  --line:      #cec4ac;
+  --accent:    #b6320f;
+  --on-accent: #fdf9f0;
+  --up:        #1f6b3a;
+  --down:      #a3271a;
+
+  --font-disp: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'Inter Tight', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --disp-weight: 400;
+  --disp-track: -0.01em;
+  --disp-size: clamp(3.2rem, 9vw, 7.5rem);
+  --disp-lh: 0.94;
+  --radius: 2px;
+  --grain: 1;
+}
+
+/* ---------- 2. BRASS: graphite and warm metal ---------- */
+:root[data-theme="brass"] {
+  --bg:        #131517;
+  --panel:     #1b1e21;
+  --panel-2:   #23272b;
+  --ink:       #e9e7e2;
+  --muted:     #8d918e;
+  --line:      #2c3135;
+  --accent:    #c9a227;
+  --on-accent: #17150c;
+  --up:        #6fbf8a;
+  --down:      #d4674f;
+
+  --font-disp: 'Inter Tight', system-ui, sans-serif;
+  --font-sans: 'Inter Tight', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --disp-weight: 600;
+  --disp-track: -0.045em;
+  --disp-size: clamp(3rem, 8.2vw, 6.8rem);
+  --disp-lh: 0.92;
+  --radius: 4px;
+  --grain: 0;
+}
+
+/* ---------- 3. SIGNAL: a white field, one electric blue ---------- */
+:root[data-theme="signal"] {
+  --bg:        #ffffff;
+  --panel:     #f3f4f7;
+  --panel-2:   #e8eaf0;
+  --ink:       #08090c;
+  --muted:     #6d7076;
+  --line:      #e0e3e9;
+  --accent:    #1428ff;
+  --on-accent: #ffffff;
+  --up:        #067a3c;
+  --down:      #d81f2a;
+
+  --font-disp: 'Inter Tight', system-ui, sans-serif;
+  --font-sans: 'Inter Tight', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --disp-weight: 700;
+  --disp-track: -0.055em;
+  --disp-size: clamp(3.2rem, 9vw, 7.4rem);
+  --disp-lh: 0.9;
+  --radius: 0px;
+  --grain: 0;
+}
+
+/* ---------- 4. OXIDE: deep blue, coral on top ---------- */
+:root[data-theme="oxide"] {
+  --bg:        #080d19;
+  --panel:     #101728;
+  --panel-2:   #182238;
+  --ink:       #e6ecf7;
+  --muted:     #7c8699;
+  --line:      #1d2739;
+  --accent:    #ff6b4a;
+  --on-accent: #1a0b06;
+  --up:        #47d3a0;
+  --down:      #ff5470;
+
+  --font-disp: 'Inter Tight', system-ui, sans-serif;
+  --font-sans: 'Inter Tight', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --disp-weight: 500;
+  --disp-track: -0.04em;
+  --disp-size: clamp(3rem, 8.5vw, 7rem);
+  --disp-lh: 0.95;
+  --radius: 10px;
+  --grain: 0;
+}
+
+/* ---------- 5. MONO: no colour, the typography carries it ---------- */
+:root[data-theme="mono"] {
+  --bg:        #ffffff;
+  --panel:     #ffffff;
+  --panel-2:   #f4f4f4;
+  --ink:       #000000;
+  /* #767676 gave 4.1:1 on white, below the AA threshold. Measured, not eyeballed. */
+  --muted:     #6b6b6b;
+  --line:      #000000;
+  --accent:    #000000;
+  --on-accent: #ffffff;
+  --up:        #000000;
+  --down:      #6b6b6b;
+
+  --font-disp: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --disp-weight: 500;
+  --disp-track: -0.06em;
+  --disp-size: clamp(2.6rem, 7vw, 5.6rem);
+  --disp-lh: 1;
+  --radius: 0px;
+  --grain: 0;
+}
+
+/* =========================================================================
+   The basics
+   ========================================================================= */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color .25s ease, color .25s ease;
+}
+
+/* Paper has to be paper. In the other themes --grain is zero. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: calc(var(--grain) * 0.4);
+  background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,.18) 1px, transparent 0);
+  background-size: 3px 3px;
+}
+
+a { color: inherit; text-decoration: none; }
+em { font-style: italic; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.accent { color: var(--accent); }
+.up { color: var(--up); }
+.down { color: var(--down); }
+
+/* =========================================================================
+   The tape
+   ========================================================================= */
+.tape {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: .5rem 0;
+}
+.tape-track {
+  display: flex;
+  width: max-content;
+  animation: roll 70s linear infinite;
+}
+@keyframes roll { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .tape-track { animation: none; } }
+
+.tick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .5rem;
+  padding: 0 1.4rem;
+  border-right: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.tick b { font-weight: 600; }
+.tick i { font-style: normal; color: var(--muted); }
+.tick u { text-decoration: none; }
+
+/* =========================================================================
+   The header
+   ========================================================================= */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .85rem clamp(1rem, 4vw, 3rem);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: .55rem; margin-right: auto; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  font-weight: 600;
+}
+.brand-word { font-weight: 600; letter-spacing: .12em; font-size: .88rem; }
+
+.nav-links { display: flex; gap: 1.35rem; margin-right: .5rem; }
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .1em;
+  color: var(--muted);
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
+}
+.nav-links a:hover { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* =========================================================================
+   Buttons
+   ========================================================================= */
+.btn {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .1em;
+  padding: .55rem .9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+.btn:hover { border-color: var(--ink); }
+.btn-solid { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn-solid:hover { filter: brightness(1.1); border-color: var(--accent); }
+.btn-solid.is-flat {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+  filter: none;
+}
+.btn-line { border-color: var(--ink); }
+.btn-lg {
+  font-size: .74rem;
+  padding: .9rem 1.5rem;
+  font-family: var(--font-mono);
+}
+
+/* =========================================================================
+   Hero
+   ========================================================================= */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
+  gap: clamp(2rem, 5vw, 5rem);
+  align-items: center;
+  padding: clamp(3.5rem, 9vw, 8rem) clamp(1rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--muted);
+  margin: 0 0 1.6rem;
+}
+
+.display {
+  font-family: var(--font-disp);
+  font-weight: var(--disp-weight);
+  letter-spacing: var(--disp-track);
+  font-size: var(--disp-size);
+  line-height: var(--disp-lh);
+  margin: 0 0 1.5rem;
+}
+.display em { color: var(--accent); }
+
+.lede {
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  max-width: 46ch;
+  color: var(--muted);
+  margin: 0 0 2rem;
+}
+.lede span { color: var(--ink); font-family: var(--font-mono); font-size: .92em; }
+
+.hero-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-bottom: 1.6rem; }
+
+.fineprint {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 56ch;
+  margin: 1.2rem 0 0;
+}
+
+/* ---------- The grid of a hundred ---------- */
+.hundred { margin: 0; }
+.hundred-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 3px;
+  aspect-ratio: 1;
+  max-width: 420px;
+  margin-inline: auto;
+}
+.cell {
+  /* The tone of a cell is a shade of the accent, shifted by the token's position in the basket. */
+  background: color-mix(in oklab, var(--accent) calc(100% - var(--t) * 72%), var(--panel-2));
+  border-radius: calc(var(--radius) / 2);
+  transition: transform .12s ease, opacity .12s ease;
+}
+.hundred-grid:hover .cell { opacity: .28; }
+.hundred-grid .cell.lit { opacity: 1; transform: scale(1.14); }
+.hundred figcaption {
+  margin-top: 1rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+
+/* =========================================================================
+   The bands
+   ========================================================================= */
+.band {
+  padding: clamp(3rem, 7vw, 5.5rem) clamp(1rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 2;
+}
+.band-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+.band-head .num {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: .1rem .45rem;
+}
+.band-head h2 {
+  font-family: var(--font-disp);
+  font-weight: var(--disp-weight);
+  letter-spacing: var(--disp-track);
+  font-size: clamp(1.7rem, 3.6vw, 2.7rem);
+  margin: 0;
+}
+.tag {
+  font-family: var(--font-mono);
+  font-size: .64rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+.band-lede { max-width: 62ch; color: var(--muted); margin: -1rem 0 2rem; }
+
+/* The live-source badge. Orange means there is data, but not the data that
+   was promised: stale, fallback, or never arrived at all. That cannot be
+   hidden. */
+.tag.live { color: var(--up); border-bottom-color: var(--up); }
+.tag.warn { color: var(--down); border-bottom-color: var(--down); }
+
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: .5rem;
+  background: var(--muted);
+  vertical-align: middle;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.dot.ok { background: var(--up); animation: none; }
+.dot.bad { background: var(--down); animation: none; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+
+/* The empty state says that it is empty, and why. An empty table with no
+   words reads as breakage. */
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  background: var(--panel);
+  max-width: 62ch;
+}
+.empty strong {
+  display: block;
+  font-family: var(--font-disp);
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  letter-spacing: var(--disp-track);
+  margin-bottom: .6rem;
+}
+.empty p { margin: 0; color: var(--muted); font-size: .92rem; }
+
+td.loading {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .1em;
+}
+
+/* =========================================================================
+   The figures
+   ========================================================================= */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stat {
+  background: var(--panel);
+  padding: 1.4rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.stat-k {
+  font-family: var(--font-mono);
+  font-size: .64rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stat-v {
+  font-family: var(--font-disp);
+  font-weight: var(--disp-weight);
+  letter-spacing: var(--disp-track);
+  font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.stat-v.mono { font-family: var(--font-mono); font-weight: 500; }
+.stat-n { font-family: var(--font-mono); font-size: .68rem; color: var(--muted); }
+.stat-clock .stat-v { color: var(--accent); }
+
+/* =========================================================================
+   The calculator
+   ========================================================================= */
+.calc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.calc-input {
+  background: var(--panel);
+  padding: 1.8rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.calc-amount {
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  font-weight: 500;
+  letter-spacing: -.03em;
+  line-height: 1;
+}
+/* The background is the line colour: through the 1px gaps it draws the dividers. */
+.calc-out {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 26px;
+  background: transparent;
+  cursor: grab;
+}
+input[type="range"]:active { cursor: grabbing; }
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--line);
+}
+input[type="range"]::-moz-range-track { height: 2px; background: var(--line); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.calc-presets { display: flex; gap: .4rem; flex-wrap: wrap; }
+.calc-presets button {
+  font-family: var(--font-mono);
+  font-size: .66rem;
+  letter-spacing: .08em;
+  padding: .4rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.calc-presets button:hover { color: var(--ink); border-color: var(--ink); }
+.calc-presets button.on {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.slice {
+  margin-top: 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.slice summary {
+  cursor: pointer;
+  padding: .9rem 1.2rem;
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+}
+.slice summary::marker { color: var(--accent); }
+/* Five columns, not auto-fit: there are exactly ten tokens, and with six in
+   a row the last row left two empty grey rectangles. */
+.slice-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+}
+.slice-row {
+  background: var(--panel);
+  padding: .8rem 1.2rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  font-size: .8rem;
+}
+.slice-row b { font-family: var(--font-mono); font-size: .74rem; letter-spacing: .06em; }
+
+.footline {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  color: var(--muted);
+  margin: 1.2rem 0 0;
+}
+
+/* =========================================================================
+   Tables
+   ========================================================================= */
+/* Wide tables scroll inside themselves. The body of the page never moves sideways. */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.ten-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+.ten-table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 400;
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.ten-table td { padding: .9rem 1rem; border-bottom: 1px solid var(--line); font-size: .86rem; }
+.ten-table tr:last-child td { border-bottom: none; }
+.ten-table tbody tr:hover { background: var(--panel-2); }
+.c-num { text-align: right; }
+.c-rank { color: var(--muted); width: 1%; white-space: nowrap; }
+.c-name b { display: block; font-family: var(--font-mono); font-size: .78rem; letter-spacing: .06em; }
+.c-name span { display: block; font-size: .72rem; color: var(--muted); }
+/* The symbol leads to the explorer: the address can be checked without trusting the page. */
+.c-name a { display: block; border-bottom: 1px solid transparent; }
+.c-name a:hover b { color: var(--accent); }
+.c-name a:hover { border-bottom-color: var(--line); }
+
+/* =========================================================================
+   The steps
+   ========================================================================= */
+.steps { list-style: none; padding: 0; margin: 0; max-width: 72ch; counter-reset: s; }
+.steps li {
+  display: flex;
+  gap: 1.2rem;
+  padding: 1.1rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: .95rem;
+}
+.steps li:last-child { border-bottom: none; }
+.steps li > span:first-child {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  color: var(--accent);
+  padding-top: .25rem;
+  flex: 0 0 2rem;
+}
+.steps span[data-brand-ticker] { font-family: var(--font-mono); font-size: .88em; }
+
+/* =========================================================================
+   The footer
+   ========================================================================= */
+.foot {
+  padding: clamp(2.5rem, 6vw, 4rem) clamp(1rem, 4vw, 3rem);
+  display: grid;
+  gap: 1.6rem;
+  background: var(--panel);
+}
+.foot-brand { display: flex; align-items: center; gap: .6rem; font-weight: 600; letter-spacing: .12em; }
+.foot-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+.foot-cols div { display: flex; flex-direction: column; gap: .3rem; }
+.foot-cols .mono { font-size: .78rem; color: var(--muted); }
+
+/* =========================================================================
+   The palette panel
+   ========================================================================= */
+/* The palette panel is a narrow strip along the bottom. As a card at the side
+   it sat straight on top of the hero buttons: you could pick a theme, but you
+   could no longer press "Calculate". */
+.palette {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: clamp(.6rem, 2vw, 1.2rem);
+  z-index: 60;
+  max-width: calc(100vw - 1.2rem);
+  display: flex;
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 40px rgba(0,0,0,.3);
+  overflow: hidden;
+}
+.palette[hidden] { display: none; }
+
+.palette-list { display: flex; overflow-x: auto; }
+
+.palette-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+  padding: .6rem .75rem;
+  min-width: 78px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+  color: var(--ink);
+}
+.palette-item:hover { background: var(--panel-2); }
+.palette-item[aria-pressed="true"] {
+  background: var(--panel-2);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+.palette-item b {
+  font-family: var(--font-mono);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.palette-item[aria-pressed="true"] b { color: var(--accent); }
+
+.palette-swatch {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.palette-swatch i { display: block; width: 13px; height: 22px; }
+
+.palette-meta {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 0 .7rem 0 .9rem;
+  font-size: .6rem;
+  letter-spacing: .05em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.palette-meta button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .8rem;
+  line-height: 1;
+  padding: .3rem;
+}
+.palette-meta button:hover { color: var(--ink); }
+
+/* =========================================================================
+   Narrow screens
+   ========================================================================= */
+@media (max-width: 1180px) {
+  /* The divisors of ten: 5, 2, 1. Any other column count leaves a tail. */
+  .slice-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 940px) {
+  .hero { grid-template-columns: 1fr; }
+  .hundred-grid { max-width: 340px; }
+  .calc { grid-template-columns: 1fr; }
+  .nav-links { display: none; }
+}
+@media (max-width: 560px) {
+  .slice-grid { grid-template-columns: 1fr; }
+  /* On a narrow screen the caption ate the whole width and one palette out
+     of five was left past the edge, that is, there was nothing to choose
+     from. */
+  .palette { left: .6rem; right: .6rem; transform: none; max-width: none; }
+  .palette-list { flex: 1 1 auto; min-width: 0; }
+  /* All five buttons have to fit whole: a fifth theme cut in half reads as
+     "there are four of them". */
+  .palette-item { min-width: 0; flex: 1 1 0; padding: .55rem .35rem; }
+  .palette-swatch i { width: 10px; height: 18px; }
+  .palette-meta span { display: none; }
+  .palette-meta { padding: 0 .2rem; }
+  .nav { gap: .5rem; }
+  .btn { padding: .5rem .7rem; font-size: .62rem; }
+  .hero-actions .btn-lg { width: 100%; text-align: center; }
+}
+
+/* Focus is always visible. Hidden focus disappears exactly when it is looked for. */
+:where(a, button, summary, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "echo dependencies are needed only by the server on Railway",
+  "buildCommand": "echo the storefront is static, there is nothing to build",
+  "outputDirectory": ".",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://api-production-2cac.up.railway.app/api/:path*"
+    }
+  ]
+}
