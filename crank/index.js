@@ -33,7 +33,7 @@
                          lives in the crank service's variable and nowhere
                          else: it never reaches the database.
      APEX_RPC       the node. Live by default; for a fork run put
-                       http://127.0.0.1:8545 here
+                       http://127.0.0.1:8899 here
 
    TWO WALLETS
 
@@ -97,8 +97,10 @@ const WATCH = ARG.has('--watch');
         hand and once;
      2. the token address is entered in the console (or in the variable),
         the very act this whole question arose for;
-     3. the node answers that this is Robinhood Chain and not some other
-        network.
+     3. the node answers with the genesis hash of Solana mainnet and
+        not of some other cluster. Solana has no network id at all, and
+        the hash is stricter than an id: an id is set by whoever starts
+        the node, a hash is computed from the contents.
 
    Any of the three missing means a dry run, and the crank prints which one
    is missing. No "it switched itself on and I did not understand why".

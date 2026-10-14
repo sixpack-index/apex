@@ -120,8 +120,8 @@ npm install
 npm run check
 ```
 
-476 checks, no network needed. Four suites: the storefront, the server, the
-crank's rules, the send layer, and one that runs a whole epoch pass end to end
+542 checks, no network needed. Five suites: the storefront, the server, the
+crank rules, the send layer, and one that runs a whole epoch pass end to end
 against a stubbed node.
 
 Each suite also runs with `--break`, which deliberately breaks the thing being
