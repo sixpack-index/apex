@@ -201,7 +201,7 @@ function padTape() {
    word for word. All of them are about our token: market cap, the liquidity
    of its pool, its volume, holders, payouts. There is no token, so a dash
    everywhere except the clock. He does the same himself with holders:
-   "— / not indexed yet".
+   "— / not counted yet".
    ========================================================================= */
 function paintSummary() {
   const k = $$('.kpi');
@@ -235,7 +235,7 @@ function paintSummary() {
 
   set(k[3], BRAND.name.toLowerCase() + ' holders',
       Number.isFinite(S.holders) ? nf(S.holders) : NA,
-      Number.isFinite(S.holders) ? 'read from the explorer' : 'not indexed yet');
+      Number.isFinite(S.holders) ? 'token accounts, read from the node' : 'not counted yet');
 
   /* FOUR CARDS ABOUT EPOCHS, ONE THOUGHT RATHER THAN FOUR DASHES
 
@@ -1262,7 +1262,7 @@ function paintHero3d() {
    Here the places with a dash get a class, and CSS gives them their look: the
    small monospaced tone of a rule. The meaning does not change: the caption
    beside them already says in words what exactly is missing, "no token
-   deployed", "not trading yet", "not indexed yet".
+   deployed", "not trading yet", "not counted yet".
 
    By a pass over a list rather than by an edit to every output site: a dozen
    different functions put dashes in, and adding the class to each of them
