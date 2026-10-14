@@ -64,7 +64,7 @@ export async function migrate() {
     );
 
     /* Market snapshots of our own token. The history is not there for
-       decoration: it shows that the turnover really was there when the epoch
+       decoration: it shows that the volume really was there when the epoch
        was counted. */
     create table if not exists market (
       id         bigserial primary key,
@@ -103,18 +103,18 @@ export async function migrate() {
        as much as it likes. A race between two collectors is settled by the
        database itself. */
     create table if not exists epochs (
-      hash    text primary key,
-      at      timestamptz not null,
-      block   bigint,
-      symbol  text,
-      token   text,
-      amount  double precision,
-      raw     jsonb
+      signature text primary key,                -- the transaction signature, base58
+      at        timestamptz not null,
+      slot      bigint,
+      symbol    text,
+      token     text,
+      amount    double precision,
+      raw       jsonb
     );
     create index if not exists epochs_at on epochs (at desc);
 
     /* Holder snapshots: without the history there is no honest way to say
-       how many addresses passed the cut off, and the eligible supply card
+       how many addresses passed the floor, and the eligible supply card
        promises exactly that. */
     create table if not exists holders (
       token text not null,
@@ -122,6 +122,32 @@ export async function migrate() {
       count integer not null,
       primary key (token, at)
     );
+  `);
+
+  /* RENAMING THE COLUMNS OF THE PREVIOUS CHAIN.
+
+     The database on Railway is older than the move to Solana: the epochs
+     table stands there with the columns hash and block, which are EVM
+     notions. On Solana a transaction is identified by a signature, and time
+     is measured in slots. Leaving the old names means that in a month
+     somebody will read "block" and go looking for a block number that does
+     not exist.
+
+     `create table if not exists` does not change an existing table, so the
+     rename goes separately and once each. The condition is the presence of
+     the old column: that makes it safe to repeat on every start. */
+  await q(`
+    do $$
+    begin
+      if exists (select 1 from information_schema.columns
+                 where table_name = 'epochs' and column_name = 'hash') then
+        alter table epochs rename column hash to signature;
+      end if;
+      if exists (select 1 from information_schema.columns
+                 where table_name = 'epochs' and column_name = 'block') then
+        alter table epochs rename column block to slot;
+      end if;
+    end $$;
   `);
 }
 

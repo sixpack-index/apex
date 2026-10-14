@@ -9,9 +9,9 @@
 
 /* import, not require: a package.json with "type": "module" appeared in
    the root for the sake of the server, and the whole repository became ES
-   modules at once. The check silently stopped running - I noticed it by
-   accident, which would have been the worst outcome of all: a test that
-   does not run looks like a test that passed. */
+   modules at once. The check silently stopped running: I noticed it by
+   accident, which would have been the worst outcome of all, because a test
+   that does not run looks like a test that passed. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,6 +162,212 @@ const ok = (name, cond, extra = '') => {
   ok('the case of the symbol does not save a stable from the filter',
      !ten.some(t => /syrup/i.test(t.sym)));
   ok('the order goes by depth', ten[0].sym === 'CCC' && ten[2].sym === 'AAA');
+}
+
+/* ---- Basket selection: THE REAL ONE, not a copy of the rule ----
+
+   The block above keeps its own list of stables and therefore records a
+   decision rather than deriving it from the code. Here `isConstituent`
+   itself is called out of core.js: break the rule in there and it is these
+   very lines that fall.
+
+   The occasion was a live case on 28 September: U, "United Stables", a
+   dollar at 0.9994 moving 0.01% over the day, stood EIGHTH in the ten. The
+   list by name did not catch it, because a dollar is under no obligation to
+   be called USD. */
+{
+  await import('./core.js');
+  const C = globalThis.ApexCore;
+  /* THE NAME IS DELIBERATELY NOT FROM THE LIST. With the symbol U the check
+     would pass on a broken rule too: that one is caught by the list of
+     names. Verified by substitution, the suite answered "ok" on code with
+     no `looksPegged`. Here only behaviour can catch it. */
+  const peg = { sym: 'BUCK', name: 'Buckaroo Dollar', price: 0.9994, chg24: 0.01 };
+  ok('a dollar by behaviour rather than by name: not in the basket', !C.isConstituent(peg));
+  ok('and the same one is caught by behaviour on its own', C.looksPegged(peg));
+
+  /* A live coin near a dollar passes: it gets shaken about over the day. */
+  const alive = { sym: 'XYZ', name: 'Some Coin', price: 1.004, chg24: 7.2 };
+  ok('a coin near a dollar, but alive, keeps its seat', C.isConstituent(alive));
+
+  /* And the other way round: a calm day is no reason to throw out
+     something that does not stand at one. Otherwise the filter would eat
+     any quiet day of any coin. */
+  const calm = { sym: 'QQQ', name: 'Quiet Coin', price: 0.0254, chg24: 0.2 };
+  ok('a quiet day does not make a coin a dollar', C.isConstituent(calm));
+
+  ok('the deviation threshold and the movement threshold are set as numbers',
+     Number.isFinite(C.PEG_BAND) && Number.isFinite(C.PEG_MOVE),
+     C.PEG_BAND + ' / ' + C.PEG_MOVE);
+  ok('U is in the list of names as well, belt and braces', C.NOT_CONSTITUENTS.has('U'));
+}
+
+/* ---- The turnover floor ----
+
+   The mirror of the ceiling on the average trade: there it catches inflated
+   volume, here inflated depth. The fixture numbers are taken from a live
+   measurement on 29 September.  */
+{
+  await import('./core.js');
+  const C = globalThis.ApexCore;
+  const mk = (liq, vol, txns, cap) => ({ liq, vol24: vol, txns24: txns, marketCap: cap });
+
+  /* STATICS as it was: a pool of ten and a half million, 254 trades,
+     volume of 129 thousand. Turnover 0.012. */
+  ok('parked depth earns no seat',
+     !C.isTraded(mk(10_526_371, 129_063, 254, 15_987_747)));
+
+  /* STANDARD: the same picture, milder, 0.052. */
+  ok('depth with no trading earns no seat in the mild case either',
+     !C.isTraded(mk(13_894_178, 721_233, 403, 21_521_767)));
+
+  /* PONS, the nearest live one: 0.18, nearly twice the threshold. */
+  ok('real trading clears the threshold',
+     C.isTraded(mk(3_698_328, 678_524, 1_579, 358_642_429)));
+
+  /* Small but brisk: depth a little above the floor, turnover of one. */
+  ok('a small brisk pool gets a seat',
+     C.isTraded(mk(237_806, 255_075, 2_246, 3_000_000)));
+
+  /* The turnover floor and the depth floor look in different directions,
+     and both are needed. */
+  ok('high turnover does not save a thin pool',
+     !C.isTraded(mk(50_000, 400_000, 1_000, 2_000_000)));
+
+  ok('the threshold is set as a number', Number.isFinite(C.TURNOVER_FLOOR), C.TURNOVER_FLOOR);
+
+  /* THE CEILING. Numbers from a live measurement of Solana on 14 October.
+     On the previous chain there was no trouble with churn at all, on Solana
+     the top of the list is taken up by it. */
+  /* The market cap is taken such that the depth to market cap rule does not
+     interfere: what is checked here is the churn ceiling, not that one. On
+     the real SOL that ratio is far smaller, and it is screened out BY IT
+     rather than by the ceiling. That is not an accident but a decision
+     about the composition: see SOLANA.md. */
+  const SOL   = mk(46_819_141, 233_890_062, 385_411, 4_681_914_100);  // 5.0
+  const HYPE  = mk(743_574, 5_790_093, 11_056, 1e8);          // 7.8
+  const ALLOX = mk(315_990, 4_603_593, 4_134, 1e8);           // 14.6
+  const PULT  = mk(341_727, 149_995_682, 136_971, 1e8);       // 438.9
+
+  ok('the base asset of the chain keeps its seat', C.isTraded(SOL));
+  ok('a brisk but live market passes', C.isTraded(HYPE));
+  ok('churn of fifteen depths earns no seat', !C.isTraded(ALLOX));
+  ok('churn of four hundred and thirty nine depths all the more so', !C.isTraded(PULT));
+  ok('the ceiling is above the most traded asset of the chain',
+     C.TURNOVER_CEILING > 233_890_062 / 46_819_141, C.TURNOVER_CEILING);
+}
+
+/* ---- A ticker faked with foreign alphabets ----
+
+   On 14 October the first by volume on Solana was "ՍЅᎠТ": an Armenian Ս, a
+   Cyrillic Ѕ, a Cherokee Ꭰ, a Cyrillic Т. To the eye that is USDT, to the
+   code it is four different letters. Volume of 170 million in 52 trades. */
+{
+  await import('./core.js');
+  const C = globalThis.ApexCore;
+  ok('a fake USDT folds back into USDT', C.normSym('ՍЅᎠТ') === 'USDT', C.normSym('ՍЅᎠТ'));
+  ok('and it does not go into the basket',
+     !C.isConstituent({ sym: 'ՍЅᎠТ', name: 'x', price: 1.0, chg24: 0.01 }));
+}
+
+/* ---- The index collects the coins of THIS chain ----
+
+   A measurement on 14 October, two hundred Solana pools. Foreign markets of
+   three kinds crept in among the eligible ones, and each would have taken a
+   real seat in the ten: the base asset and the bridged majors, the PayPal
+   dollar, the tokenized shares NVDAx and GOOGLx. */
+{
+  await import('./core.js');
+  const C = globalThis.ApexCore;
+  const live = { price: 0.05, chg24: 12, liq: 2e6, vol24: 4e6, txns24: 9000, marketCap: 3e7 };
+  const go = (sym, name, extra = {}) => C.isConstituent({ ...live, sym, name, ...extra });
+
+  ok('the base asset of the chain is not bought with its own fee', !go('SOL', 'Solana'));
+  ok('nor is the wrapper of the base asset', !go('WSOL', 'Wrapped SOL'));
+  ok('bridged bitcoin is not our market', !go('cbBTC', 'Coinbase Wrapped BTC'));
+  ok('bridged ether is not our market', !go('WETH', 'Wrapped Ether'));
+  ok('liquid staking is not a coin of the chain', !go('JitoSOL', 'Jito Staked SOL'));
+  ok('a bridge is caught by name without a list', !go('ABC', 'Bitcoin (Portal)'));
+  ok('the PayPal dollar is not a coin', !go('PYUSD', 'PayPal USD', { price: 1.00013, chg24: 0.01 }));
+  ok('a tokenized share by name', !go('NVDAx', 'NVIDIA xStock', { price: 229.9, chg24: 1.2 }));
+  ok('and by the look of the ticker', !go('TSLAx', 'Tesla', { price: 400, chg24: 2 }));
+
+  /* The other side: the chain's own coins keep their seats. */
+  ok('a meme of the chain passes', go('BONK', 'Bonk'));
+  ok('the coin of the venue passes', go('PUMP', 'Pump'));
+  ok('the coin of a protocol passes', go('RAY', 'Raydium'));
+  ok('a lower case ticker is not confused with a share', go('arc', 'arc'));
+}
+
+/* ---- Bypassing the exclusion list through the look of a ticker ----
+
+   Verified on live data on 29 September: the network already has a "USDG "
+   with a space on the tail, next to sixteen other fakes of Global Dollar.
+   What threw it out was not the name but a small pool, that is, we got
+   lucky. */
+{
+  await import('./core.js');
+  const C = globalThis.ApexCore;
+  const live = { price: 0.5, chg24: 9, liq: 5e6, vol24: 5e6, txns24: 9000, marketCap: 1e8 };
+  const passes = sym => C.isConstituent({ ...live, sym, name: 'x' });
+
+  ok('a space on the tail does not bypass the list', !passes('USDG '));
+  ok('a space at the start does not bypass the list', !passes(' USDG'));
+  ok('a non-breaking space does not bypass the list', !passes('WETH\u00A0'));
+  ok('a tab does not bypass the list', !passes('\tUSDT'));
+  ok('an invisible separator inside the word does not bypass the list', !passes('USD\u200BG'));
+  ok('lower case does not bypass the list', !passes('usdg'));
+  ok('a Cyrillic C in USDC does not bypass the list', !passes('USDС'));
+
+  /* The other side: the normalizer must not eat the live ones. */
+  ok('the normalizer does not touch an ordinary ticker', passes('CASHCAT'));
+  ok('digits and signs in a ticker survive normalization', passes('1INCH'));
+  ok('normSym brings things to one form', C.normSym(' usd\u200Bg ') === 'USDG',
+     C.normSym(' usd\u200Bg '));
+}
+
+/* ---- Our own token does not go into our own basket ----
+
+   The docs promise it in words, and in the code it was nowhere: not in the
+   core, not in the crank. The promise held only on the fact that there is
+   no token yet. It would have fired on the very first day: a seat is given
+   60 per cent by volume and by trade count, and a fresh launch has more of
+   both than anything on the network.
+
+   The check goes through the sources rather than by a call: `readBasket`
+   goes to the network, and it has no business in a suite. We guard what
+   breaks silently: a missing argument at one of the three callers. */
+{
+  const core = fs.readFileSync(path.join(here, 'core.js'), 'utf8');
+  ok('the core takes the address of our own token', /async function readBasket\(\{\s*exclude/.test(core));
+  ok('and throws it out before the selection',
+     /\.filter\(t => !self \|\| t\.address !== self\)/.test(core));
+
+  /* THE WHOLE FILE IS GUARDED, NOT A SLICE INSIDE readBasket.
+
+     At first this only looked from `readBasket` to `rankSeats`, and that
+     turned out not to be enough: case folding was hiding in two other
+     places in the same file, one function away from the check. In
+     `foldPairs` it was a map key, so two different coins differing only
+     in case collapsed into one basket row. In `marketOf` it compared our
+     address with a pair's address, so somebody else's coin could be
+     taken for ours.
+
+     Folding the case of an address is wrong EVERYWHERE on this chain, so
+     the check now covers the whole file. */
+  const folds = (core.match(/.{0,70}toLowerCase.{0,40}/g) || [])
+    .filter(line => /address|token|addr|pubkey|mint/i.test(line));
+  ok('addresses are nowhere folded to one case', folds.length === 0, folds);
+
+  for (const [file, who] of [['server/collect.js', 'the server'],
+                             ['crank/index.js', 'the crank'],
+                             ['chain.js', 'the storefront']]) {
+    const src = fs.readFileSync(path.join(here, file), 'utf8');
+    const calls = src.match(/readBasket\([^)]*\)/g) || [];
+    ok(who + ' passes the address of our own token to the basket',
+       calls.length > 0 && calls.every(c => c.includes('exclude')),
+       calls.join(' '));
+  }
 }
 
 /* ---- Weights ----

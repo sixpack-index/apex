@@ -18,9 +18,9 @@ import './../core.js';
 import { q, settings } from './db.js';
 /* The gas cost of an epoch is counted by the crank, and this is that same
    function rather than a copy of it. Two pieces of arithmetic for one
-   question are bound to diverge, and to diverge silently: the dashboard
-   would say "enough for forty epochs" while the crank stops on the third. */
-import { gasForEpoch } from './../crank/plan.js';
+   question are bound to diverge, and to diverge silently: the console would
+   say "enough for forty epochs" while the crank stops on the third. */
+import { costForEpoch } from './../crank/plan.js';
 
 const C = globalThis.ApexCore;
 
@@ -36,6 +36,24 @@ const EVERY = {
   gas: 5 * 60_000,
 };
 
+/* A REQUEST TO THE NODE WITH A CEILING ON TIME.
+
+   Both balance reads went through a bare fetch, with no timeout. A hung node
+   held the task forever, and the timer once every five minutes started a new
+   one on top of it, and they piled up. Twelve seconds, the same as in
+   core.js. */
+const RPC_TIMEOUT_MS = 12_000;
+
+async function rpc(body) {
+  const r = await fetch(C.CHAIN.rpc, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+  });
+  return r;
+}
+
 /* What happened last time. Served in /api/health: a silent collector is the
    worst kind of breakage, so its state is always visible from outside. */
 export const health = {
@@ -43,8 +61,15 @@ export const health = {
   basket: { at: null, ok: null, why: null, source: null },
   self: { at: null, ok: null, why: null },
   holders: { at: null, ok: null, why: null },
-  vault: { at: null, ok: null, why: null, added: 0 },
-  gas: { at: null, ok: null, why: null, eth: null, epochs: null },
+  /* The fields are listed in full on purpose: `mark` mixes the new into the
+     old, and a field forgotten here would show up in the response only
+     after the first successful read. While a field that has STAYED here
+     from the previous chain lives in the response forever: `eth: null` hung
+     in /api/health long after the move to Solana and promised the reader
+     ether that does not exist. */
+  vault: { at: null, ok: null, why: null, added: 0, lamports: null, sol: null },
+  gas: { at: null, ok: null, why: null, sol: null, lamports: null,
+         epochs: null, rentSol: null, rentOk: null, address: '' },
 };
 
 function mark(what, ok, why, extra) {
@@ -55,7 +80,11 @@ function mark(what, ok, why, extra) {
 /* ---------- the basket of the chain ---------- */
 async function collectBasket() {
   try {
-    const d = await C.readBasket();
+    /* Our own token does not go into our own basket: promised in the docs,
+       held to here. We take the address from the settings, the same one that
+       is typed into the console. */
+    const s = await settings();
+    const d = await C.readBasket({ exclude: s.token || '' });
     if (!d.basket.length) throw new Error('the basket came back empty');
     await q(
       'insert into basket (source, scanned, priced, rows) values ($1, $2, $3, $4)',
@@ -115,63 +144,54 @@ async function collectHolders() {
   }
 }
 
-/* ---------- the vault ---------- */
+/* ---------- what the creator fee has accumulated ----------
 
-/* A reserve of confirmations. Reading right up to the freshest block is not
-   allowed: it may be reorganised, and a payout shown on the site would
-   vanish from the chain. Five blocks on Orbit are seconds of waiting and no
-   risk at all. */
-const CONFIRMATIONS = 5;
+   THERE WAS SOMETHING ELSE HERE, AND IT DOES NOT CARRY OVER.
 
-/**
- * The history of payouts.
- *
- * The whole history of the address is read from the very beginning, not
- * "from now". This is not extra work but a lesson: a watcher that starts at
- * the current moment sees nothing that arrived before the address was typed
- * in, and the first epochs are lost forever. Blockscout serves the history
- * whole, and a key on the hash makes reading it again free.
- */
+   On the previous chain this collector reconstructed the HISTORY OF PAYOUTS
+   off the chain: Blockscout served every token transfer to the vault address
+   in a single request, with the hash, the time and the amount, and a key on
+   the hash made reading it again free. The storefront showed that history as
+   proof: not "we paid" but "here are the transfers, check for yourself".
+
+   On Solana that is not possible, and the reason is arithmetical. There is
+   no explorer here with a free transfer history (Solscan asks for a key),
+   and a node is asked for history by signatures: getSignaturesForAddress
+   serves a list, and every signature needs a getTransaction of its own. An
+   epoch of a thousand holders over ten coins is ten thousand transfers in
+   several hundred transactions. Reconstructing that every five minutes is
+   hundreds of requests for one epoch, and a public node sheds load at that
+   point (measured: a 413 after a few heavy requests).
+
+   SO THE SOURCE OF THE HISTORY HAS CHANGED: it is written by THE CRANK
+   ITSELF, when it closes an epoch, into that same epochs table. It knows
+   what it sent, more precisely than any explorer, and with every record it
+   puts the signature of the transaction, by which anyone who wants to can
+   open it in an explorer and check.
+
+   What is worse about this: it is self reporting, not a read of the chain.
+   The storefront can no longer say "we do not trust ourselves and read it
+   again". What is better: it works, and the signature in every row keeps a
+   check possible, it just makes it a step for the reader rather than ours.
+
+   This collector has one job left, and it is a useful one every day: to read
+   how much HAS ACCUMULATED on the creator fee account. Under the scheme with
+   two wallets the owner takes it by hand, which means he has to see when the
+   time has come. */
 async function collectVault() {
   try {
     const s = await settings();
     const vault = s.vault;
-    if (!C.isAddress(vault)) { mark('vault', true, null, { added: 0 }); return; }
+    if (!C.isAddress(vault)) { mark('vault', true, null, { added: 0, sol: null }); return; }
 
-    let head = null;
-    try {
-      const b = await C.ask(C.CHAIN.explorer + '/api/v2/blocks?type=block', 2);
-      head = Number(b && b.items && b.items[0] && b.items[0].height);
-    } catch (_) { /* without a head we simply will not cut off the tail */ }
+    const r = await rpc({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [vault] });
+    if (!r.ok) throw new Error('the node answered ' + r.status);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || 'the node returned an error');
+    const lamports = j.result && j.result.value;
+    if (typeof lamports !== 'number') throw new Error('the node gave no balance');
 
-    const d = await C.ask(
-      C.CHAIN.explorer + '/api/v2/addresses/' + vault + '/token-transfers?type=ERC-20', 3);
-    const items = (d && d.items) || [];
-
-    let added = 0;
-    for (const t of items) {
-      const hash = t.transaction_hash || t.tx_hash;
-      if (!hash) continue;
-      const block = Number(t.block_number ?? t.block);
-      if (Number.isFinite(head) && Number.isFinite(block) && head - block < CONFIRMATIONS) continue;
-
-      const dec = Number((t.token && t.token.decimals) ?? 18);
-      const raw = t.total && (t.total.value ?? t.total);
-      const amount = raw !== undefined && raw !== null && Number.isFinite(dec)
-        ? Number(raw) / Math.pow(10, dec)
-        : null;
-
-      const r = await q(
-        `insert into epochs (hash, at, block, symbol, token, amount, raw)
-         values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict (hash) do nothing`,
-        [hash, t.timestamp, Number.isFinite(block) ? block : null,
-         t.token && t.token.symbol, t.token && t.token.address,
-         Number.isFinite(amount) ? amount : null, JSON.stringify(t)]
-      );
-      added += r.rowCount;
-    }
-    mark('vault', true, null, { added });
+    mark('vault', true, null, { added: 0, lamports, sol: lamports / 1e9, address: vault });
   } catch (e) {
     mark('vault', false, e.message);
   }
@@ -185,10 +205,9 @@ async function collectVault() {
    epochs, the storefront keeps showing the basket, nobody notices a thing
    until the first complaint from a holder.
 
-   So the balance is read in here and shown on the dashboard. It is read by a
+   So the balance is read in here and shown on the console. It is read by a
    direct call to the node: an explorer is not needed for a single number and
-   answers 403 without a header, while eth_getBalance is on every node
-   always.
+   answers 403 without a header, while getBalance is on every node always.
 
    There is no key here and there cannot be: the server knows the address and
    can only look. The crank signs, at its own place, with its own key. */
@@ -201,67 +220,57 @@ async function collectGas() {
     /* We blank out ALL the fields, not only the balance. `mark` mixes the new
        into the old, and without this the reserve in epochs stayed from the
        previous read after the address was removed: no address, no balance,
-       and yet "enough for 3 epochs" is there. The dashboard does not show
-       that number right now, but it sat in the API response, and a field
-       that outlived its reason lies right up until the first reader. */
+       and yet "enough for 3 epochs" is there. The console does not show that
+       number right now, but it sat in the API response, and a field that has
+       outlived its reason lies right up until the first reader. */
     if (!C.isAddress(who)) {
-      mark('gas', true, null, { eth: null, epochs: null, wei: null,
-                                gasPriceWei: null, address: '' });
+      mark('gas', true, null, { sol: null, epochs: null, lamports: null,
+                                rentSol: null, rentOk: null, address: '' });
       return;
     }
 
-    const r = await fetch(C.CHAIN.rpc, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [who, 'latest'],
-      }),
-    });
+    const r = await rpc({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [who] });
     if (!r.ok) throw new Error('the node answered ' + r.status);
     const j = await r.json();
     if (j.error) throw new Error(j.error.message || 'the node returned an error');
-    if (typeof j.result !== 'string') throw new Error('the node gave no balance');
+    const lamports = j.result && j.result.value;
+    if (typeof lamports !== 'number') throw new Error('the node gave no balance');
+    const sol = lamports / 1e9;
 
-    /* Through BigInt and not Number: the balance arrives in wei, and 0.05 ETH
-       is 5e16, past the integers a double can hold. We divide afterwards. */
-    const wei = BigInt(j.result);
-    const eth = Number(wei) / 1e18;
+    /* THE BALANCE ON ITS OWN SAYS NOTHING. On the previous chain it was
+       converted into epochs: how many distributions this gas will carry. On
+       Solana the question is a different one and a more important one,
+       because the main cost is a one off.
 
-    /* On its own "0.031 ETH" says nothing: it is unclear whether that is a
-       lot or whether it stops tomorrow. So the balance is converted into
-       epochs straight away, into the one thing this ether is lying there
-       for.
+       We count two things:
+         how many epochs it will carry on the REPEATING costs, that is, on
+         the fees for signatures, and that is the "how long it will last";
+         whether there is enough at all for the ONE OFF opening of the
+         recipients' accounts, because without that the first distribution
+         will not happen.
 
-       The number of recipients is taken from the last holder snapshot: a
-       distribution is transfers, and there are the more of them the more
-       holders there are. While the holders have not been read yet, we count
-       by the ceiling in the rules (10 000 wallets): better to frighten in
-       advance than to reassure for nothing. */
-    let epochs = null, gasPriceWei = null;
+       The number of recipients is taken from the last holder snapshot. While
+       the holders have not been read, we count by the ceiling in the rules,
+       ten thousand wallets: better to frighten in advance than to reassure
+       for nothing. */
+    let epochs = null, rentSol = null, rentOk = null;
     try {
-      const g = await fetch(C.CHAIN.rpc, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] }),
-      });
-      const gj = await g.json();
-      if (typeof gj.result === 'string') {
-        gasPriceWei = BigInt(gj.result);
-        const hold = s.token
-          ? (await q('select count from holders where token = $1 order by at desc limit 1',
-                     [s.token])).rows[0]
-          : null;
-        const recipients = hold && Number.isFinite(Number(hold.count))
-          ? Number(hold.count)
-          : 10_000;
-        const perEpoch = BigInt(gasForEpoch(recipients)) * gasPriceWei;
-        if (perEpoch > 0n) epochs = Number(wei / perEpoch);
-      }
-    } catch (_) { /* without a gas price there simply is no reserve in epochs */ }
+      const hold = s.token
+        ? (await q('select count from holders where token = $1 order by at desc limit 1',
+                   [s.token])).rows[0]
+        : null;
+      const recipients = hold && Number.isFinite(Number(hold.count))
+        ? Number(hold.count)
+        : 10_000;
+      const c = costForEpoch(recipients);
+      rentSol = Number(c.rent) / 1e9;
+      rentOk = lamports >= Number(c.rent);
+      const fees = Number(c.fees);
+      if (fees > 0) epochs = Math.floor(lamports / fees);
+    } catch (_) { /* without a holder snapshot these two numbers just will not be there */ }
 
     mark('gas', true, null, {
-      eth, wei: wei.toString(), address: who, epochs,
-      gasPriceWei: gasPriceWei === null ? null : gasPriceWei.toString(),
+      sol, lamports, address: who, epochs, rentSol, rentOk,
     });
   } catch (e) {
     mark('gas', false, e.message);

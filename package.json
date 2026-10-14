@@ -2,17 +2,21 @@
   "name": "apex",
   "private": true,
   "type": "module",
-  "description": "An index token on Robinhood Chain: a static storefront plus a server that reads the chain and stores the settings.",
+  "description": "An index token on Solana: a static shop window, a server that reads the chain and keeps the settings, and a crank that hands the basket out to holders.",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node server/index.js",
-    "check": "node check.js && node server/check.js && node crank/check.js && node crank/check-send.js",
-    "check:journal": "node crank/check-journal.js"
+    "check": "node check.js && node server/check.js && node crank/check.js && node crank/check-send.js && node crank/check-tick.js",
+    "check:journal": "node crank/check-journal.js",
+    "crank": "node crank/index.js",
+    "crank:watch": "node crank/index.js --watch"
   },
   "dependencies": {
-    "ethers": "^6.17.0",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^6.0.0",
     "pg": "^8.13.1"
   }
 }

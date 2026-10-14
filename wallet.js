@@ -1,24 +1,29 @@
 /* =========================================================================
-   The wallet.
+   The wallet. Solana.
 
    Everything to do with connecting lives here and nowhere else: the page
    knows how to draw, the core how to compute, and this file how to talk to a
    wallet.
 
    What it does once connected:
-     - says whether the visitor is on the right network, and switches with one
-       button;
-     - shows the ETH balance (that is the gas) and the balance of our token;
-     - substitutes the real balance into the calculator in place of the
-       slider;
-     - says whether the wallet clears the 0.01% cutoff, that is, whether it
-       will receive a dividend at all.
+     shows the SOL balance and the balance of our token;
+     substitutes the real balance into the calculator in place of the slider;
+     says whether the wallet clears the 0.01% floor, that is, whether it will
+     receive a dividend at all.
 
-   Why EIP-6963 and not `window.ethereum`: a person usually has several
-   extensions, and they fight over one and the same variable. On the previous
-   project Phantom intercepted the injection from the EVM wallets, and
-   "connect" opened the wrong one. The standard solves this by having each
-   extension announce itself, and we show the list.
+   WHAT IS NO LONGER HERE: switching the network. On EVM that was half the
+   file: wallet_switchEthereumChain, wallet_addEthereumChain, the network
+   parameters, the chainId check, the "Switch to Robinhood Chain" button and
+   the "wrong network" branch all through the drawing. Solana has one network,
+   there is nothing to switch, and that whole layer is thrown out rather than
+   rewritten.
+
+   HOW WALLETS ARE FOUND. The standard here is its own, Wallet Standard: an
+   extension announces itself with a `wallet-standard:register-wallet` event
+   instead of taking over one shared variable. It is the same trick as
+   EIP-6963 on EVM, and for exactly the same reason: a person has several
+   extensions, and they fight over `window.solana`. The fallback path for the
+   ones that cannot do the standard is left below and marked.
 
    An ordinary script rather than a module, and wrapped in a function, like
    the core and chain.js: <script> tags share one lexical scope across the
@@ -29,43 +34,59 @@
 
 const C = globalThis.ApexCore;
 
-/* Network parameters for wallet_addEthereumChain. They match ChainList and
-   the Robinhood documentation, checked on 26 August. If a wallet does not
-   know the chain, it will offer to add it from these fields. */
-const NETWORK = {
-  chainId: '0x1237',                    // 4663
-  chainName: 'Robinhood Chain',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: [C.CHAIN.rpc],
-  blockExplorerUrls: [C.CHAIN.explorer],
-};
-
 const $ = (s, r = document) => r.querySelector(s);
-const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 /* ---------- the wallets found ---------- */
 
-/* Each extension announces itself with an event. We collect them into a map
-   keyed by uuid: one and the same wallet announces itself several times, and
-   without a key the list fills up with duplicates. */
 const WALLETS = new Map();
 
-window.addEventListener('eip6963:announceProvider', e => {
-  const d = e.detail;
-  if (d && d.info && d.provider) WALLETS.set(d.info.uuid, d);
-});
-window.dispatchEvent(new Event('eip6963:requestProvider'));
+/* Registration by the standard. A wallet can announce itself both before our
+   script and after it, so we both listen and ask them to announce
+   themselves. */
+function register(w) {
+  if (!w || !w.name) return;
+  const chains = w.chains || [];
+  /* We are interested in Solana mainnet only. A wallet that can do nothing
+     but test networks is only in the way in the list. */
+  if (chains.length && !chains.some(c => String(c).startsWith('solana:'))) return;
+  WALLETS.set(w.name, { info: { uuid: w.name, name: w.name, icon: w.icon || '' }, wallet: w });
+}
 
-/** The list of wallets. If not one announced itself, we try the old way. */
-function available() {
-  const list = [...WALLETS.values()];
-  if (list.length) return list;
-  /* The fallback path for extensions that cannot do EIP-6963. It is also the
-     reason the standard appeared: the wrong wallet may turn up here. */
-  if (window.ethereum) {
-    return [{ info: { uuid: 'legacy', name: 'Injected wallet', icon: '' }, provider: window.ethereum }];
+window.addEventListener('wallet-standard:register-wallet', e => {
+  try { e.detail(({ register: reg }) => reg && reg()); } catch (_) {}
+  const w = e.detail && e.detail.wallet;
+  if (w) register(w);
+});
+try {
+  window.dispatchEvent(new CustomEvent('wallet-standard:app-ready', {
+    detail: { register: (...ws) => ws.forEach(register) },
+  }));
+} catch (_) {}
+
+/* THE FALLBACK PATH. Wallets that put themselves into window the old way.
+   It is also the reason the standard appeared: the wrong one may land here. */
+function injected() {
+  const out = [];
+  const add = (name, p) => { if (p && typeof p.connect === 'function') out.push({ info: { uuid: name, name, icon: '' }, provider: p }); };
+  add('Phantom', window.phantom && window.phantom.solana);
+  add('Solflare', window.solflare);
+  add('Backpack', window.backpack);
+  if (!out.length && window.solana && typeof window.solana.connect === 'function') {
+    add('Injected wallet', window.solana);
   }
-  return [];
+  return out;
+}
+
+function available() {
+  const std = [...WALLETS.values()].map(d => ({
+    info: d.info,
+    /* Under the standard a wallet has features; any one that can connect
+       suits us. The same record gives access to the provider object. */
+    provider: (d.wallet.features && d.wallet.features['standard:connect']) ? d.wallet : null,
+    wallet: d.wallet,
+  })).filter(d => d.provider || d.wallet);
+  const seen = new Set(std.map(d => d.info.name.toLowerCase()));
+  return std.concat(injected().filter(d => !seen.has(d.info.name.toLowerCase())));
 }
 
 /* ---------- state ---------- */
@@ -74,46 +95,57 @@ const S = {
   provider: null,
   info: null,
   account: '',
-  chainId: '',
-  eth: null,        // the gas balance, in ether
+  sol: null,        // the SOL balance
   token: null,      // the balance of our token, in whole coins
   busy: false,
 };
 
-const LS = 'apex.wallet';        // the last wallet chosen
+const LS = 'apex.wallet';
 
-/* ---------- talking to the chain through the wallet ---------- */
+/* ---------- talking to the chain ----------
 
-const rpc = (method, params) => S.provider.request({ method, params });
-
-const hexToNum = h => (typeof h === 'string' ? parseInt(h, 16) : Number(h));
-const unwei = (hex, dec = 18) => Number(BigInt(hex || '0x0')) / Math.pow(10, dec);
-
-/** balanceOf(address): the selector is worked out ahead of time so as not to pull in a library. */
-function balanceOfData(addr) {
-  return '0x70a08231' + '000000000000000000000000' + addr.replace(/^0x/, '').toLowerCase();
+   We read through the node directly rather than through the wallet: the
+   wallet has its own node, its own limits and its own confirmation windows,
+   while all we need is to read two balances. The signature comes from the
+   wallet, the reading from the node. */
+async function rpc(method, params) {
+  const r = await fetch(C.CHAIN.rpc, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || 'the node returned an error');
+  return j.result;
 }
 
 async function readBalances() {
-  S.eth = null;
+  S.sol = null;
   S.token = null;
   if (!S.account) return;
 
   try {
-    const wei = await rpc('eth_getBalance', [S.account, 'latest']);
-    S.eth = unwei(wei);
+    const r = await rpc('getBalance', [S.account]);
+    S.sol = Number(r && r.value) / 1e9;
   } catch (e) {
-    console.warn('could not read the gas balance:', e.message);
+    console.warn('the SOL balance did not read:', e.message);
   }
 
   const token = window.ApexChain.launchAddress('token');
   if (!token) return;
   try {
-    const res = await rpc('eth_call', [{ to: token, data: balanceOfData(S.account) }, 'latest']);
-    /* The denominator is not taken by eye: the launchpad token has 18
-       decimals, but checking somebody else's contract from memory is a sure
-       way to show a number off by a factor of a billion. */
-    S.token = unwei(res, 18);
+    /* The token sits not on the wallet but on a separate account for this
+       mint, and a wallet can have several accounts for one mint. We ask for
+       all of them and add them up: showing the balance of one of them means
+       one day showing less than the person has. */
+    const r = await rpc('getTokenAccountsByOwner',
+      [S.account, { mint: token }, { encoding: 'jsonParsed' }]);
+    const accs = (r && r.value) || [];
+    S.token = accs.reduce((sum, a) => {
+      const amt = a.account.data.parsed.info.tokenAmount;
+      return sum + Number(amt.uiAmount || 0);
+    }, 0);
   } catch (e) {
     console.warn('the token balance did not read:', e.message);
   }
@@ -121,121 +153,82 @@ async function readBalances() {
 
 /* ---------- connecting ---------- */
 
-async function connect(detail) {
+async function connect(d) {
   if (S.busy) return;
   S.busy = true;
-  paint();
   try {
-    S.provider = detail.provider;
-    S.info = detail.info;
-    const accounts = await rpc('eth_requestAccounts', []);
-    S.account = (accounts && accounts[0]) || '';
-    S.chainId = await rpc('eth_chainId', []);
-    try { localStorage.setItem(LS, detail.info.uuid); } catch (_) {}
-
-    /* The subscriptions are set on the provider once: if a person changes
-       wallet or network, the page has to notice that itself rather than show
-       the wrong balance until a reload. That is exactly how the wallet card
-       once showed a balance two and a half times larger than the real one. */
-    if (!detail._wired) {
-      detail._wired = true;
-      S.provider.on && S.provider.on('accountsChanged', accs => {
-        S.account = (accs && accs[0]) || '';
-        if (!S.account) disconnect();
-        else readBalances().then(paint);
-        paint();
-      });
-      S.provider.on && S.provider.on('chainChanged', id => {
-        S.chainId = id;
-        readBalances().then(paint);
-        paint();
-      });
+    let account = '';
+    if (d.wallet && d.wallet.features && d.wallet.features['standard:connect']) {
+      const res = await d.wallet.features['standard:connect'].connect();
+      const acc = res && res.accounts && res.accounts[0];
+      account = acc ? acc.address : '';
+      S.provider = d.wallet;
+    } else {
+      const res = await d.provider.connect();
+      account = String((res && res.publicKey) || d.provider.publicKey || '');
+      S.provider = d.provider;
     }
-
-    if (onRightChain()) await readBalances();
+    if (!account) throw new Error('the wallet did not hand out an address');
+    S.account = account;
+    S.info = d.info;
+    try { localStorage.setItem(LS, d.info.uuid); } catch (_) {}
+    await readBalances();
   } catch (e) {
-    /* 4001 means the person pressed "cancel". That is not an error, and there
-       is nothing to go red about. */
-    if (e && e.code !== 4001) console.warn('the connection failed:', e.message || e);
-    if (!S.account) { S.provider = null; S.info = null; }
+    /* A refusal in the wallet window is not a breakage, it is an answer of
+       "no". We keep quiet. */
+    if (!/reject|denied|cancel/i.test(e.message || '')) {
+      console.warn('the connection failed:', e.message);
+    }
   } finally {
     S.busy = false;
-    paint();
   }
 }
 
 function disconnect() {
+  try {
+    if (S.provider && S.provider.features && S.provider.features['standard:disconnect']) {
+      S.provider.features['standard:disconnect'].disconnect();
+    } else if (S.provider && typeof S.provider.disconnect === 'function') {
+      S.provider.disconnect();
+    }
+  } catch (_) {}
   S.provider = null; S.info = null; S.account = '';
-  S.chainId = ''; S.eth = null; S.token = null;
+  S.sol = null; S.token = null;
   try { localStorage.removeItem(LS); } catch (_) {}
   paint();
-}
-
-const onRightChain = () => hexToNum(S.chainId) === C.CHAIN.id;
-
-/**
- * Switch the network, and if the wallet does not know it, offer to add it.
- * 4902 means "no such network"; then we add it from NETWORK and try again.
- */
-async function switchChain() {
-  if (!S.provider) return;
-  try {
-    await rpc('wallet_switchEthereumChain', [{ chainId: NETWORK.chainId }]);
-  } catch (e) {
-    if (e && (e.code === 4902 || (e.data && e.data.originalError && e.data.originalError.code === 4902))) {
-      try { await rpc('wallet_addEthereumChain', [NETWORK]); }
-      catch (e2) { console.warn('the network was not added:', e2.message || e2); }
-    } else if (e && e.code !== 4001) {
-      console.warn('the network did not switch:', e.message || e);
-    }
-  }
-  try { S.chainId = await rpc('eth_chainId', []); } catch (_) {}
-  if (onRightChain()) await readBalances();
-  paint();
+  pushBalanceToCalc();
 }
 
 /* ---------- drawing ---------- */
 
-const short = a => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
-const nf = (v, d = 0) => Number(v).toLocaleString('en-US',
-  { minimumFractionDigits: d, maximumFractionDigits: d });
+const nf = (v, d = 0) =>
+  Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+/* A Solana address is longer than an EVM one, so we cut more out of the
+   middle: otherwise it does not fit into the button on a phone. */
+const short = a => a ? a.slice(0, 4) + '…' + a.slice(-4) : '';
+
+const row = (k, v) => '<div class="wl-row"><span>' + k + '</span>' +
+  (v.startsWith('<') ? v : '<b>' + v + '</b>') + '</div>';
+
+const buyUrl = () => (window.ApexChain ? window.ApexChain.buyLink() : '');
 
 function paint() {
-  const btn = $('.connect');
-  const pop = $('.wl-pop');
+  const btn = $('.wl .connect');
   if (!btn) return;
-
-  if (S.busy) {
-    btn.innerHTML = '<i aria-hidden="true"></i>CONNECTING…';
-    btn.disabled = true;
-    return;
-  }
-  btn.disabled = false;
-
-  if (!S.account) {
-    btn.innerHTML = '<i aria-hidden="true"></i>CONNECT WALLET';
-    btn.classList.remove('on');
-  } else if (!onRightChain()) {
-    btn.innerHTML = '<i aria-hidden="true"></i>WRONG NETWORK';
-    btn.classList.remove('on');
-  } else {
-    btn.innerHTML = '<i aria-hidden="true"></i>' + short(S.account);
-    btn.classList.add('on');
-  }
-
-  if (pop && !pop.hidden) paintPop(pop);
-  paintHolding();
+  btn.innerHTML = S.account
+    ? '<i aria-hidden="true"></i>' + short(S.account)
+    : '<i aria-hidden="true"></i>CONNECT WALLET';
 }
 
-/** The contents of the dropdown: his layout, our strings. */
 function paintPop(pop) {
   const rows = [];
 
   if (!S.account) {
     const list = available();
     if (!list.length) {
-      rows.push('<div class="wl-err">No wallet found. Install MetaMask or another ' +
-        'EVM extension, then reload the page.</div>');
+      rows.push('<div class="wl-err">No Solana wallet found. Install Phantom, ' +
+        'Solflare or another Solana wallet, then reload the page.</div>');
     } else {
       list.forEach(d => {
         rows.push('<button type="button" class="wl-opt" data-uuid="' + d.info.uuid + '">' +
@@ -246,60 +239,42 @@ function paintPop(pop) {
     }
   } else {
     rows.push(row('address', short(S.account)));
-    rows.push(row('network', onRightChain()
-      ? '<b class="ok">Robinhood Chain</b>'
-      : '<b class="warn">chain ' + (hexToNum(S.chainId) || '?') + '</b>'));
+    rows.push(row('network', '<b class="ok">Solana</b>'));
+    rows.push(row('SOL', S.sol === null ? '—' : nf(S.sol, 4)));
 
-    if (!onRightChain()) {
-      rows.push('<div class="wl-err">Wrong network. Tap to switch — if your wallet ' +
-        'does not know this chain, it will be added for you.</div>');
-      rows.push('<button type="button" class="wl-act" data-act="switch">Switch to Robinhood Chain</button>');
+    const token = window.ApexChain.launchAddress('token');
+    if (!token) {
+      rows.push(row('balance', '<b>—</b>'));
+      rows.push('<div class="wl-err">The token is not launched yet, so there is no ' +
+        'balance to read. Everything else here already works.</div>');
     } else {
-      rows.push(row('gas', S.eth === null ? '—' : nf(S.eth, 5) + ' ETH'));
-      const token = window.ApexChain.launchAddress('token');
-      if (!token) {
-        rows.push(row('balance', '<b>—</b>'));
-        rows.push('<div class="wl-err">The token is not launched yet, so there is no ' +
-          'balance to read. Everything else here already works.</div>');
-      } else {
-        rows.push(row('balance', S.token === null ? '—'
-          : '<b>' + nf(S.token) + '</b> ' + (window.ApexBrand || 'APEX')));
-        const min = C.MODEL.supply * 0.0001;
-        if (S.token !== null) {
-          rows.push(row('eligible', S.token >= min
-            ? '<b class="ok">yes</b>'
-            : '<b class="warn">no — needs ' + nf(min) + '</b>'));
-        }
-        const buy = buyUrl();
-        if (buy) {
-          rows.push('<a class="wl-act" href="' + buy +
-            '" target="_blank" rel="noopener">Buy on the launchpad</a>');
-        }
+      rows.push(row('balance', S.token === null ? '—'
+        : '<b>' + nf(S.token) + '</b> ' + (window.ApexBrand || 'APEX')));
+      const min = C.MODEL.supply * 0.0001;
+      if (S.token !== null) {
+        rows.push(row('eligible', S.token >= min
+          ? '<b class="ok">yes</b>'
+          : '<b class="warn">no — needs ' + nf(min) + '</b>'));
       }
-      if (S.eth !== null && S.eth < 0.0002) {
-        rows.push('<div class="wl-err">Almost out of gas. ETH reaches this chain over ' +
-          'the Arbitrum bridge — without it no trade goes through.</div>');
+      const buy = buyUrl();
+      if (buy) {
+        rows.push('<a class="wl-act" href="' + buy +
+          '" target="_blank" rel="noopener">Buy on pump.fun</a>');
       }
+    }
+    /* The threshold is not plucked out of the air: at the current queue price
+       one signature costs about 0.00002 SOL, and five thousandths are enough
+       for hundreds of trades. Below that a person runs into "not enough SOL"
+       on the very first one. */
+    if (S.sol !== null && S.sol < 0.005) {
+      rows.push('<div class="wl-err">Almost out of SOL. Every transaction on Solana ' +
+        'needs a little, and a swap needs a little more.</div>');
     }
     rows.push('<button type="button" class="wl-act ghost" data-act="disconnect">Disconnect</button>');
   }
 
   pop.innerHTML = rows.join('');
 }
-
-const row = (k, v) => '<div class="wl-row"><span>' + k + '</span>' +
-  (v.startsWith('<') ? v : '<b>' + v + '</b>') + '</div>';
-
-/* Buying happens on the launchpad, but the address of its page is taken from
-   the settings rather than assembled from a template. The Pons storefront is
-   a single-page application: cards are opened by script, and the direct path
-   `/token/0x…` serves the same home page. I checked that in a browser, which
-   is why there is no template here.
-
-   A friend has no such link on his site at all, and a person arriving from
-   the storefront is forced to look for the coin themselves. We will have one,
-   but only a real one. */
-const buyUrl = () => (window.ApexChain ? window.ApexChain.buyLink() : '');
 
 /**
  * Substitute the real balance into the calculator.
@@ -309,21 +284,14 @@ const buyUrl = () => (window.ApexChain ? window.ApexChain.buyLink() : '');
  * an invented 19,650,000.
  */
 function paintHolding() {
-  /* The caption moved together with the relaid calculator: it used to live in
-     `.cbox .ann`, which no longer exists. A reference like that does not fall
-     over and does not complain, it simply stops finding the element, and the
-     caption about the wallet silently disappears. So the selector here is one
-     and the same as in the markup, not "roughly the same". */
   const ann = $('.calc-in .calc-note');
   if (!ann) return;
   if (!S.account) { ann.textContent = 'drag, type or pick a preset'; return; }
-  if (!onRightChain()) { ann.textContent = 'wrong network'; return; }
   if (S.token === null) { ann.textContent = short(S.account); return; }
   ann.textContent = short(S.account) + ' · holds ' + nf(S.token);
 
   /* The MAX button appears only when there is something to put into it. An
-     empty button that does nothing looks like it works and keeps quiet: on
-     this same code a "copy address" button already lived a month that way. */
+     empty button that does nothing looks like it works and keeps quiet. */
   const max = $('.chip.wallet-max');
   if (max) {
     const has = Number.isFinite(S.token) && S.token > 0;
@@ -337,23 +305,19 @@ function paintHolding() {
   }
 }
 
-/** Put the wallet balance into the slider once, after which the person moves it themselves. */
-let pushedOnce = false;
 function pushBalanceToCalc() {
-  if (pushedOnce || S.token === null || S.token <= 0) return;
-  const input = $('.calc input[type="range"]');
-  if (!input || typeof window.ApexCalc !== 'function') return;
-  pushedOnce = true;
-  window.ApexCalc(S.token);
+  paintHolding();
+  if (S.token !== null && S.token > 0 && typeof window.ApexCalc === 'function') {
+    window.ApexCalc(S.token);
+  }
 }
 
 /* ---------- wiring ---------- */
 
 function wire() {
-  const btn = $('.connect');
   const wl = $('.wl');
-  if (!btn || !wl) return;
-
+  if (!wl) return;
+  const btn = $('.connect', wl);
   let pop = $('.wl-pop', wl);
   if (!pop) {
     pop = document.createElement('div');
@@ -378,21 +342,14 @@ function wire() {
     }
     const act = e.target.closest('[data-act]');
     if (!act) return;
-    if (act.dataset.act === 'switch') { await switchChain(); paintPop(pop); await afterConnect(); }
     if (act.dataset.act === 'disconnect') { disconnect(); paintPop(pop); }
   });
 
-  /* A click outside closes it: a dropdown that cannot be closed is more
-     annoying than no dropdown at all.
-
-     The event path is taken from composedPath rather than by asking
-     `wl.contains(target)`. The difference is not obvious and cost an hour: a
-     handler inside the panel redraws its contents, the pressed button drops
-     out of the tree in the process, and by the time of this check `contains`
-     answers "no", so the panel closed by itself right after a wallet was
-     picked, and the network switch button ended up in the markup but
-     invisible. composedPath is captured at the moment of the event and
-     survives the redraw. */
+  /* A click outside closes it. The event path is taken from composedPath
+     rather than by asking `wl.contains(target)`: a handler inside the panel
+     redraws its contents, the pressed button drops out of the tree in the
+     process, and by the time of the check `contains` answers "no". The panel
+     closed by itself right after a wallet was picked. */
   document.addEventListener('click', e => {
     if (pop.hidden) return;
     const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
@@ -422,16 +379,18 @@ async function restore() {
   const d = available().find(x => x.info.uuid === saved);
   if (!d) return;
   try {
-    const accs = await d.provider.request({ method: 'eth_accounts' });
-    if (!accs || !accs.length) return;          // permission revoked, keep quiet
+    /* A quiet connect: the standard allows asking without a window, and if
+       the permission has been revoked the wallet simply refuses. We keep
+       quiet either way: this is a background attempt, not a person's
+       action. */
     await connect(d);
-    await afterConnect();
-  } catch (_) { /* silently: this is a background attempt, not a person's action */ }
+    if (S.account) await afterConnect();
+  } catch (_) {}
 }
 
 window.ApexWallet = {
-  wire, restore, connect, disconnect, switchChain, buyUrl,
-  get state() { return { ...S, onRightChain: onRightChain() }; },
+  wire, restore, connect, disconnect, buyUrl,
+  get state() { return { ...S }; },
 };
 
 })();

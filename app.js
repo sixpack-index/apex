@@ -7,11 +7,10 @@
      READ FROM THE CHAIN: the basket, prices, the 24h change, liquidity,
        volumes. That is the truth.
      COMPUTED FROM THE MODEL: how much the treasury would collect and how
-       much of it would reach a holder. Arithmetic over live numbers and one
+       much would reach a holder. Arithmetic over live numbers and one
        assumption, named out loud.
      DOES NOT EXIST: the $APEX price, holders, the payout history. None of
-       that is on the page: a site must not promise more than its code can
-       do.
+       that is on the page: a site must not promise more than its code can do.
    ========================================================================= */
 
 const BRAND = {
@@ -19,21 +18,18 @@ const BRAND = {
   ticker: 'APEX',
 };
 
-/* The wallet lives in a file of its own and cannot reach BRAND, so we put
-   the ticker into window ourselves. wallet.js used to read
-   `window.DimehoodBrand`, which nobody ever set, and silently showed the
-   fallback name written inside it: a second list of the same thing, bound to
-   diverge on the first rename. */
+/* The wallet lives in a file of its own and cannot reach BRAND, so we put the
+   ticker into window ourselves. wallet.js used to read `window.DimehoodBrand`,
+   which nobody ever set, and silently showed the fallback name written inside
+   it: a second list of the same thing, bound to diverge on the first rename. */
 window.ApexBrand = BRAND.ticker;
 
-/* The API base. Empty means the same domain, `/api/*` is rewritten to
-   Railway through vercel.json; the absolute address is needed only when the
-   page is opened from file://.
+/* The API base. Empty means the same domain, `/api/*` is rewritten to Railway
+   through vercel.json; the absolute address is needed only on file://.
 
-   This constant used to live inside the block that loaded the order book and
-   would have left together with it when the packaging was dropped. Token
-   icons are pulled through the same relay, so it is needed without the order
-   book too. */
+   This constant lived inside the block that loaded the order book and would
+   have left together with it when the packaging was dropped. Token icons are
+   pulled through the same relay, so it is needed without the order book too. */
 const API_BASE = (location.protocol === 'file:')
   ? 'https://api-production-2cac.up.railway.app'
   : '';
@@ -44,20 +40,20 @@ const API_BASE = (location.protocol === 'file:')
    `import()` inside an ordinary (non-module) script resolves the path **from
    the address of the page**, not from the address of the script. While there
    is one page and it sits in the root there is no difference; on a page in a
-   subfolder `./stage.js` turns into `/subfolder/stage.js`, which is not
-   there, and the figure silently fails to start: what is left is the static
-   drawing from the markup, and that looks like the real thing working.
+   subfolder `./stage.js` turns into `/subfolder/stage.js`, which is not there,
+   and the figure silently fails to start: what is left is the static drawing
+   from the markup, and that looks like the real thing working.
 
-   Exactly this happened on the variant drafts: the sphere was in place and
-   did not rotate, and it went unnoticed on the screenshot. We count from the
+   Exactly this happened on the variant drafts: the sphere was in place and did
+   not rotate, and it went unnoticed on the screenshot. We count from the
    script itself. */
 const HERE = (document.currentScript && document.currentScript.src) || location.href;
 
-/* The rules of the mechanism live in core.js, one set of numbers for the
-   whole project: the calculator here computes by them, the server sizes the
-   epoch by them, and /docs describes those same numbers in words. A copy
-   here would mean two lists of one and the same thing; they diverge on the
-   first patch, and silently. */
+/* The rules of the mechanism live in core.js, one set of numbers for the whole
+   project: the calculator here computes by them, the server sizes the epoch by
+   them, and /docs describes those same numbers in words. A copy here would
+   mean two lists of one and the same thing; they diverge on the first patch,
+   and silently. */
 const MODEL = globalThis.ApexCore.MODEL;
 
 /* Seat weights in basis points: [1667, 1667, 1667, 1667, 1666, 1666].
@@ -92,8 +88,7 @@ function money(v) {
   return '$0';
 }
 
-/** Price: small change is written with a zero counter, as on the exchanges
-    and as in the original. */
+/** Price: small change gets a zero counter, as on the exchanges and as in the original. */
 function price(v) {
   if (!Number.isFinite(v)) return '—';
   if (v >= 1) return '$' + nf(v, 2);
@@ -159,8 +154,8 @@ function paintTape() {
      50% and comes back, and the seam is invisible because a copy stands in
      its place. But that works only while a half covers the screen entirely.
      When the seats went from ten down to six, the half narrowed by almost
-     half, and on a wide monitor emptiness opened up behind its tail: the
-     tape literally "ended" and rode on empty.
+     half, and on a wide monitor emptiness opened up behind its tail: the tape
+     literally "ended" and rode on empty.
 
      So the list repeats as many times as it takes for a half to outgrow the
      screen. We do not judge by eye: we measure the width and top it up until
@@ -202,9 +197,9 @@ function padTape() {
 }
 
 /* =========================================================================
-   Section 1, the summary. Eight cards, headings and captions are his, word
-   for word. All of them are about our token: market cap, the liquidity of
-   its pool, its turnover, holders, payouts. There is no token, so a dash
+   Section 1, the summary. Eight cards, the headings and the captions are his,
+   word for word. All of them are about our token: market cap, the liquidity
+   of its pool, its volume, holders, payouts. There is no token, so a dash
    everywhere except the clock. He does the same himself with holders:
    "— / not indexed yet".
    ========================================================================= */
@@ -229,8 +224,11 @@ function paintSummary() {
         ? '<b>' + nf(MODEL.supply) + '</b> supply, fully circulating'
         : 'no token deployed');
 
+  /* "across 1 pools" was the only line on the page where the number and the
+     word disagreed. In its first minutes the token has exactly one pool, so
+     this line is read in exactly that form and at exactly that moment. */
   set(k[1], 'liquidity', has(S.liq) ? money(S.liq) : NA,
-      'across <b>' + (S.pools || '—') + '</b> pools');
+      'across <b>' + (S.pools || '—') + '</b> pool' + (S.pools === 1 ? '' : 's'));
 
   set(k[2], 'total volume', has(S.vol24) ? money(S.vol24) : NA,
       has(S.vol24) ? 'last 24h' : 'not trading yet');
@@ -268,10 +266,24 @@ function paintSummary() {
   /* The clock runs for real, driven by tick(). Only the caption is here, and
      before the launch it names out loud what exactly we are waiting for: not
      the "next" distribution but the first. */
+  /* THE CAPTION DOES NOT PROMISE WHAT IS NOT GOING TO HAPPEN.
+
+     Before the token launches the clock runs anyway: it is tied to the
+     three-hour grid, not to the contract. And the caption said "in this much
+     time the three cards to the left will fill in", although there is nothing
+     for them to fill in with: there is no contract, nothing to hand out, and
+     at zero the counter simply goes round again. The very first viewer who
+     sat it out to zero would have seen a lie.
+
+     Three states, not two: no contract at all, a contract and waiting for the
+     first epoch, epochs running. */
+  const live = Boolean(window.ApexChain && window.ApexChain.launchAddress('token'));
   $('.k', k[7]).textContent = paid ? 'next distribution' : 'first distribution';
   $('.s', k[7]).innerHTML = paid
     ? 'checked every <b>three hours</b> · closes once the pot covers settlement'
-    : 'the three cards to the left fill in when this reaches <b>00:00:00</b>';
+    : live
+      ? 'the three cards to the left fill in when this reaches <b>00:00:00</b>'
+      : 'epochs close every <b>three hours</b> · the clock starts counting for real at launch';
 
   // The 24h dispersion lives in the basket: computed here, shown there.
   const best = BASKET.length ? BASKET.reduce((a, b) => (b.chg24 > a.chg24 ? b : a)) : null;
@@ -282,8 +294,8 @@ function paintSummary() {
 /* =========================================================================
    Section 2, the basket. On his left is how much was handed out over nine
    epochs; we have no epochs, so a dash. On the right are two metrics about
-   the basket pools themselves: 24h turnover and dispersion. Those are read
-   from the chain both for him and for us, so we show them live.
+   the basket pools themselves: 24h volume and dispersion. Those are read from
+   the chain both for him and for us, so we show them live.
    ========================================================================= */
 function paintBasket() {
   const big = $('.big-g');
@@ -360,8 +372,8 @@ const a2s = a => {
    Kept apart from the position of the slider, and that is not a spare
    variable. The slider is discrete: a thousand steps on a logarithmic scale.
    Pressing "1M" set the position, and what was shown was whatever that
-   position worked back out to: 997,000 instead of a million. The exact value
-   now lives here, and the slider stays what it always was, a way of changing
+   position worked back out to, 997,000 instead of a million. The exact value
+   now lives here, and the slider stays what it always was: a way of changing
    it. */
 let HOLD = 19_650_000;
 
@@ -377,11 +389,14 @@ function paintCalc() {
   const input = $('.calc input[type="range"]');
   if (!input) return;
   const amount = HOLD;
-  /* The core computes it: the same thing the server computes, and the thing
-     the tests check. All that is left here is to show it. While the formula
-     lived inside this function, swapping the multiplier in it slipped past
-     every check. */
-  const D = globalThis.ApexCore.dividendFor(amount, SELF && SELF.vol24, SELF && SELF.price);
+  /* The core computes it: the same thing the server computes and the tests
+     check. All that is left here is to show it. While the formula lived in
+     this function, swapping the multiplier in it slipped past every check. */
+  /* The rate goes in fourth: the launchpad sets it and it floats, so there is
+     no computing it "by default". With no rate the whole calculator shows a
+     dash, and that is more right than yesterday's number. */
+  const D = globalThis.ApexCore.dividendFor(
+    amount, SELF && SELF.vol24, SELF && SELF.price, SELF && SELF.rate);
 
   /* We do not touch the input field while somebody is typing in it:
      overwriting the text moves the caret to the end, and typing a number
@@ -412,16 +427,17 @@ function paintCalc() {
     caveat.innerHTML = D.mine === null
       ? '<b>No token address is set,</b> so there is no volume to compute from. '
         + 'The moment the contract is live this fills in by itself.'
-      : '<b>Model, not a record.</b> Computed from live 24h volume at the '
-        + 'published rate: the pool charges ' + nf(MODEL.poolFeeBps / 100, 0)
-        + '%, the venue keeps ' + nf(MODEL.venueShare * 100, 0)
-        + '% of it, and the remaining ' + nf(MODEL.wedgeBps / 100, 1)
+      : '<b>Model, not a record.</b> Computed from live 24h volume at the rate '
+        + 'pump.fun charges right now, '
+        + (SELF && Number.isFinite(SELF.rate) ? nf(SELF.rate * 100, 2) + '%' : 'unknown')
+        + '. That rate is set by the launchpad and falls as the market cap '
+        + 'grows, so this is today\u2019s number, not a promise. It goes to '
         /* The number of seats is taken from MODEL rather than written out as
            a word. "split six ways" stood here from the days when the basket
            held six, and it survived the move to ten: the storefront carried
            "0.7% split six ways" next to ten rows of the breakdown. Caught on
            a screenshot, not by a check: the checks read numbers, not prose. */
-        + '% goes to holders in full, split ' + MODEL.seats
+        + 'holders in full, split ' + MODEL.seats
         + ' ways every ' + MODEL.epochHours
         + ' hours. Day and month figures assume this volume holds. '
         + 'No epoch has settled yet.';
@@ -466,21 +482,20 @@ function paintCalc() {
    FONTS AND THE OLD SWITCHES
 
    Five switches used to live here: ?bg= for the texture of the cards, ?fig=
-   for the figure, ?render= for the way it was shown, ?type= and ?mono= for
-   the fonts. They were needed while the decisions were made by eye on a live
-   page: arguing about a texture over messages is pointless, it has to be
-   seen.
+   for the figure, ?render= for the way it was shown, ?type= and ?mono= for the
+   fonts. They were needed while the decisions were made by eye on a live page:
+   arguing about a texture over messages is pointless, it has to be seen.
 
-   The decisions are made: foil, a six-can pack, Azeret Mono. Everything
-   spare is deleted: every unused variant is code that must not be broken by
-   any edit nearby, for the sake of a look nobody will ever see.
+   The decisions are made: foil, a six-can pack, Azeret Mono. Everything spare
+   is deleted: every unused variant is code that must not be broken by any
+   edit nearby, for the sake of a look nobody will ever see.
 
-   WHY THE KEYS ARE WIPED. The choice was remembered in localStorage, and
-   that memory outlives a deploy. Anyone who had ever opened `?render=ascii`
-   had "ascii" remembered by their browser, and after the parameters were
-   removed they would still have seen the old figure made of characters
-   instead of the pack. That is exactly what happened. Ceasing to read the
-   keys is not enough, they have to be removed.
+   WHY THE KEYS ARE WIPED. The choice was remembered in localStorage, and that
+   memory outlives a deploy. Anyone who had ever opened `?render=ascii` had
+   "ascii" remembered by their browser, and after the parameters were removed
+   they would still have seen the old figure made of characters instead of the
+   pack. That is exactly what happened. Ceasing to read the keys is not
+   enough, they have to be removed.
    ========================================================================= */
 (function forgetOldChoices() {
   try {
@@ -520,8 +535,7 @@ function paintCalc() {
  *
  *   1. The redraw key is the symbol AND the address of the picture. Keyed on
  *      the symbol alone, a row remembered "drawn" on the first read, where
- *      there were no icons yet, and skipped the next read, the one that had
- *      them.
+ *      there were no icons yet, and skipped the next read, the one with them.
  *   2. No loading="lazy". The picture is created outside the document and
  *      gets into it only after onload; a lazy one does not load until it is
  *      in the document, that is, never. The event does not arrive at all,
@@ -540,10 +554,9 @@ function paintCalc() {
 
    The first version took the most saturated shade, and on CASHCAT that gave
    brown, even though the icon is almost entirely white. The measurement
-   explains why: coloured pixels are 11.5% of it at a saturation of 0.17,
-   that is, all the "colour" is fur and shadows on a white photo. For
-   comparison, STONKBROKER has 54% coloured at a saturation of 1.00, DOGO has
-   25% at 0.90.
+   explains why: coloured pixels are 11.5% of it at a saturation of 0.17, that
+   is, all the "colour" is fur and shadows on a white photo. For comparison,
+   STONKBROKER has 54% coloured at a saturation of 1.00, DOGO has 25% at 0.90.
 
    So what decides is the share multiplied by the saturation:
      STONKBROKER 0.54 × 1.00 = 0.54     AI      0.73 × 0.34 = 0.25
@@ -560,8 +573,7 @@ function paintCalc() {
    noise, and the transparent ones. What is left is spread over twenty-four
    hue bins weighted by saturation, and inside the winning bin the hue is
    averaged AROUND THE CIRCLE, through a sine and a cosine: an ordinary mean
-   between 350° and 10° would give 180°, that is, red would come out
-   turquoise.
+   between 350° and 10° would give 180°, that is, red would come out turquoise.
 
    The saturation of the result is taken from the measurement too rather than
    set: a weak colour has to come out muted, otherwise a pale icon gets a
@@ -576,9 +588,9 @@ const TONES = new Map();
    the six basket icons, see the table above. */
 const TONE_MIN = 0.05;
 
-/* The neutral tone is written with theme variables rather than numbers:
-   there are fifteen themes, and a grey window has to be grey in the tone of
-   the current one. */
+/* The neutral tone is written with theme variables rather than numbers: there
+   are fifteen themes, and a grey window has to be grey in the tone of the
+   current one. */
 const NEUTRAL_TONE = {
   base: 'color-mix(in srgb, var(--color-block-2) 62%, #000)',
   hi:   'color-mix(in srgb, var(--color-block) 70%, transparent)',
@@ -747,7 +759,7 @@ function sparkPoints(t) {
  * Stretch a list to the required length by cloning the last element.
  *
  * WHY. The markup came down from a basket of SIX seats: six cards in "The
- * ten" and six rows in the share breakdown. The seats became ten, and the
+ * ten" and six rows in the share breakdown. The seats became ten and the
  * markup stayed as it was, and the site silently showed six out of ten. The
  * heading said "The ten", the ranks counted "01/10", the caption promised
  * "10 rows", and all of that stood above six positions.
@@ -824,9 +836,10 @@ function paintBasketCards() {
        The icons live on foreign CDNs (DexScreener and CoinGecko through the
        explorer), and every one of them has to be treated as one that will not
        load: the domain goes down, the picture gets deleted, a new constituent
-       does not have one at all. So our mark always lies under the picture,
-       and it is what stays alone if onerror fired. An empty frame instead of
-       the art looks like broken layout rather than like "there is no icon". */
+       of the basket does not have one at all. So our mark always lies under
+       the picture, and it is what stays alone if onerror fired. An empty frame
+       instead of the art looks like broken layout, not like "there is no
+       icon". */
     let art = $('.tc-art', card);
     if (!art) {
       art = document.createElement('span');
@@ -854,10 +867,10 @@ function paintBasketCards() {
 
            The picture is created outside the document and gets into it only
            after onload. The browser defers loading lazy images until they end
-           up in the markup near the viewport, and this one never will, because
-           it is waiting for its own onload. Measured: with lazy the event does
-           not arrive at all, neither onload nor onerror, and the card stands
-           there forever with the mark instead of an icon.
+           up in the markup near the viewport, and this one never will,
+           because it is waiting for its own onload. Measured: with lazy the
+           event does not arrive at all, neither onload nor onerror, and the
+           card stands there forever with the mark instead of an icon.
 
            No error, no trace in the console: it looks exactly like "there is
            no icon". */
@@ -890,8 +903,9 @@ function paintBasketCards() {
 
     /* Equal weight is a rule of the basket, not a measurement. The number is
        taken from weightsBps: six seats do not divide into ten thousand basis
-       points, and the top seats get one point more. Writing "10.00%" by hand
-       would mean lying by four hundredths and diverging from the contract. */
+       points, and the top seats get one point more. Writing "10.00%" in by
+       hand would mean lying by four hundredths and diverging from the
+       contract. */
     const bar = $('.wbar .t i', card);
     if (bar) bar.style.width = (w[i] * 100).toFixed(1) + '%';
     const em = $('.wbar + em, .tc-foot em', card);
@@ -981,7 +995,7 @@ function paintLedger() {
       '<span class="lw-t" id="ledgerClock">··:··:··</span>' +
       '<span class="lw-s">Epochs close every <b>' + MODEL.epochHours +
       ' hours</b>. The first row appears when one settles: a transaction ' +
-      'hash on Robinhood Chain, not a number typed into this page.</span>' +
+      'hash on Solana, not a number typed into this page.</span>' +
     '</div>');
   head.remove();                              // a header with no rows reads as a breakage
 
@@ -1061,18 +1075,15 @@ function paintStatus() {
    changing.
    ========================================================================= */
 const SOCIAL = {
-  x: '',        // https://x.com/…
-  /* The GitHub button is deliberately off.
+  x: 'https://x.com/ApexLayerRH',
+  /* The source mirror. Switched on 24 September: the repository is public, it
+     carries the current code, and the promise of "source, open at launch" in
+     the footer now has something behind it.
 
-     The source mirror exists and carries the whole current code, but
-     filling this line lights up a public button on the storefront, and
-     under it stands "source, open at launch", a promise somebody will have
-     to answer for. That is the owner's call, not the code's.
-
-     Write the address in and the button becomes an ordinary link, nothing
-     else needs changing. While it is empty the same mechanism as for X
-     shows a hint instead of a dead link. */
-  github: '',
+     An empty string here puts the button out and substitutes a hint instead
+     of a dead link. That is how both buttons worked while there was neither
+     an account nor a public mirror. */
+  github: 'https://github.com/sixpack-index/apex',
 };
 
 function wireSocial() {
@@ -1215,14 +1226,21 @@ function paintBuy() {
    a second.
 
    The share and the number of seats are taken from MODEL, that is, from the
-   same core the calculator and the server compute by. Liquidity and turnover
+   same core the calculator and the server compute by. Liquidity and volume
    are the sum over the basket, read from the chain.
    ========================================================================= */
 function paintHero3d() {
   const put = (k, v) => { const el = $('[data-k="' + k + '"]'); if (el) el.textContent = v; };
 
-  const wedge = MODEL.wedgeBps / 100;
-  put('wedge', (Number.isInteger(wedge) ? wedge : wedge.toFixed(1)) + '%');
+  /* THE RATE IS A RANGE, NOT A NUMBER, WHILE THERE IS NO MARKET CAP.
+
+     On the previous chain "0.7% of every trade" stood here, and that was
+     true at any size. On pump.fun the launchpad sets the rate from a table
+     tied to market cap, and it falls as the cap grows. While there is no
+     token, the only honest thing to show is the edges of that table; as soon
+     as the market cap is known, the rate in force is shown. */
+  const rate = SELF && Number.isFinite(SELF.rate) ? SELF.rate : null;
+  put('wedge', rate === null ? '0.05–0.95%' : nf(rate * 100, rate >= 0.001 ? 2 : 3) + '%');
   put('seats', String(MODEL.seats));
 
   if (!BASKET.length) { put('liq', '—'); put('vol', '—'); return; }

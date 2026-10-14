@@ -26,7 +26,7 @@ export const WRITABLE = new Set(['token', 'vault', 'note', 'buy', 'operator']);
    silently.
 
    That is why the server needs the address: it reads the balance and shows
-   it on the dashboard. There is no key here and there cannot be: only an
+   it on the console. There is no key here and there cannot be: only an
    address, only reading.
 
    The buy link lives in the settings, not in the code.
@@ -42,8 +42,8 @@ export const WRITABLE = new Set(['token', 'vault', 'note', 'buy', 'operator']);
    step.
 
    So: after the launch you open your own coin on Pons, copy the address out
-   of the browser bar and paste it into the console. While the field is
-   empty there is no button at all: the same off switch as with the token
+   of the browser bar and paste it into the console. While the field is empty
+   there is no button at all: the same off switch as with the token
    address. */
 const BUY_RE = /^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s"'<>]*)?$/i;
 
@@ -79,12 +79,36 @@ export function validateConfig(body) {
        The key lives only in a variable of the crank service: that one has
        not a single port open to the outside.
 
-       The check is by shape, not by field name: a key is recognised by how
-       it looks, sixty four hexadecimal characters, with `0x` or without. An
-       address is half as long, they cannot be confused. The refusal is loud:
-       anyone who pasted a real key in here has to find out immediately and
-       treat it as compromised. */
-    if (/^(0x)?[0-9a-fA-F]{64}$/.test(val)) {
+       ON SOLANA A KEY LOOKS DIFFERENT, AND THE OLD CHECK DID NOT CATCH IT.
+       It used to be: sixty four hexadecimal characters, with `0x` or
+       without. That is an EVM key. A Solana key is sixty four bytes, and it
+       travels in messages in three shapes:
+
+         base58, 87 or 88 characters         the most common, wallets give it
+         an array of 64 numbers in brackets  this is how id.json holds it
+         128 hexadecimal characters          rarer, but it happens
+
+       We catch all three, and we keep the old EVM shape: somebody may paste
+       a key from the old chain in here, and they have to be told as well.
+
+       WHAT THIS CHECK DOES NOT CATCH, AND THIS HAS TO BE KNOWN. Sometimes a
+       key is handed over as the thirty two bytes of a seed, also base58. By
+       its look that is EXACTLY THE SAME THING as a public address: the same
+       alphabet, the same length. They cannot be told apart by shape, and no
+       regular expression will help here.
+
+       What actually protects us: we sign nothing with anything out of the
+       database. The token, vault and operator fields are addresses, they are
+       only read from. Signing lives in APEX_WALLET_KEY on the crank service,
+       and that one has not a single port open to the outside. Which means a
+       seed typed into the console by mistake will lie there as an address
+       and will give nobody anything beyond the bare fact that it has been
+       exposed. That is why the refusal is loud everywhere the shape can be
+       seen. */
+    if (/^(0x)?[0-9a-fA-F]{64}$/.test(val)
+        || /^[0-9a-fA-F]{128}$/.test(val)
+        || /^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(val)
+        || /^\s*\[\s*\d{1,3}\s*(,\s*\d{1,3}\s*){31,}\]\s*$/.test(val)) {
       return { ok: false, error:
         'this looks like a PRIVATE KEY, not an address. It never goes into '
         + 'the settings: the database stands next to the server that faces outward. '
@@ -98,7 +122,7 @@ export function validateConfig(body) {
        empty string is allowed on purpose: it is the off switch, erase the
        address and the calculation goes dark while the site lives on. */
     if ((k === 'token' || k === 'vault' || k === 'operator') && val !== '' && !C.isAddress(val)) {
-      return { ok: false, error: 'the "' + k + '" address has to be 0x and forty hexadecimal characters, right now the count is ' + val.length };
+      return { ok: false, error: 'the "' + k + '" address has to be base58 between 32 and 44 characters long, right now it is ' + val.length };
     }
     if (k === 'note' && val.length > 500) {
       return { ok: false, error: 'the note is longer than five hundred characters' };
@@ -150,4 +174,80 @@ export function clientBucket(ip) {
     return head + '::/64';
   }
   return addr;
+}
+
+
+/**
+ * Let them in or not, as a pure decision, with no network and no database.
+ *
+ * This was pulled out on its own for exactly one reason: so that a check
+ * covers it. This is a trust boundary, and it has already broken once
+ * silently. While the decision was woven into the handler, the only way to
+ * check it was with a live request, which is to say no way at all.
+ */
+export function iconVerdict(raw, { hosts, published } = {}) {
+  if (!raw) return { ok: false, code: 400, why: 'the u parameter is needed' };
+  let u;
+  try { u = new URL(raw); } catch { return { ok: false, code: 400, why: 'a broken address' }; }
+  if (u.protocol !== 'https:') return { ok: false, code: 400, why: 'https only' };
+  if (hosts && hosts.has(u.hostname)) return { ok: true, via: 'host' };
+  if (published && published.has(raw)) return { ok: true, via: 'basket' };
+  return { ok: false, code: 403, why: 'we did not publish this picture' };
+}
+
+
+/**
+ * What kind of picture this is, by the first bytes and not by the header.
+ *
+ * Returns the type, or null if this is not a picture. Null means a refusal:
+ * a proxy that serves something which is not a picture will one day serve
+ * somebody's script from our own domain.
+ */
+export function sniffImage(buf) {
+  if (!buf || buf.length < 12) return null;
+  const b = buf;
+  const is = (...bytes) => bytes.every((v, i) => b[i] === v);
+
+  if (is(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (is(0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (is(0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (is(0x42, 0x4d)) return 'image/bmp';
+  if (is(0x00, 0x00, 0x01, 0x00)) return 'image/x-icon';
+  /* RIFF….WEBP */
+  if (is(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57 && b[9] === 0x45
+      && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+
+  /* SVG is text, and it is recognised by its beginning. We look in the first
+     two hundred bytes: before the tag there may be an xml declaration, a
+     comment or whitespace. */
+  const head = b.subarray(0, 200).toString('utf8').trim().toLowerCase();
+  if (head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'))
+      || (head.startsWith('<!doctype svg'))) return 'image/svg+xml';
+
+  return null;
+}
+
+
+/* =========================================================================
+   THE VALUE OF AN HTTP HEADER
+
+   Headers are Latin-1. To a Russian letter in a value Node answers "Invalid
+   character in header content" and brings down the WHOLE response, not the
+   header: the request serves a five hundred.
+
+   Caught by my own mistake: I put the values for "cache" and "origin" into
+   the diagnostic header `x-apex-icon` in Russian, the way all the rest of
+   the text of the project is, and all ten icons started serving five
+   hundreds. Which is to say that fixing a breakage became a new breakage.
+
+   All the text of the project is in Russian, and habit puts it everywhere.
+   That is why the rule is pulled out into a function and covered by a check
+   rather than resting on being careful.
+   ========================================================================= */
+export function headerSafe(v) {
+  const s = String(v ?? '');
+  /* The printable Latin-1 characters without the control ones. The line feed
+     and the carriage return especially: they are used to cut a response into
+     two, and that is somebody else's injection. */
+  return /^[\x20-\x7e\xa0-\xff]*$/.test(s);
 }

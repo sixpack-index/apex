@@ -27,14 +27,34 @@
    ABOUT STEPS STUCK IN "SENDING"
 
    The nastiest case: the step is recorded as sent, and there is no
-   receipt. The transaction may have gone through, or it may have been
-   lost, and the difference between those two answers is money. Guessing is
-   not allowed here, so the crank does not guess: it asks the network for a
-   receipt by hash, and if there is none, it compares the step's nonce with
-   the wallet's current nonce. The nonce has moved past: then a transaction
-   with that nonce happened, and repeating it is out of the question. If
-   there is no unambiguous answer, the run stops and calls for a human. A
-   stop costs three hours, a second payment costs money.
+   confirmation. The transaction may have gone through, or it may have been
+   lost, and the difference between those two answers is money.
+
+   ON SOLANA THAT QUESTION HAS AN EXACT ANSWER, AND THAT IS THE MAIN THING
+   THE MOVE CHANGED.
+
+   On the previous chain a transaction was identified by the wallet's
+   sequence number, the nonce. The number was taken by the signing, and a
+   vanished step left the question without an answer: is its transaction
+   still on its way, or has another one already taken the number? The
+   previous version of this file honestly wrote "unknown" and stopped the
+   crank, because continuing meant possibly paying twice. A stop cost three
+   hours, but a second payment cost money.
+
+   Here a transaction is tied to a recent blockhash, and the hash lives
+   about a minute. While it is alive, the transaction may go through. As
+   soon as the block height has passed `valid_until`, it CAN NEVER go
+   through, which means repeating it is safe, with no guessing:
+
+     the signature turned up in the chain → it went through
+     no signature, the hash is still alive → in flight, we wait
+     no signature, the hash has expired    → it did not go through, a
+                                              retry is safe
+
+   So there is no "unknown" verdict here any more. It is left for exactly
+   one case: the step is recorded and there is no hash lifetime with it,
+   and that is only possible for a record written by an old version of the
+   crank.
    ========================================================================= */
 
 import { q } from './../server/db.js';
@@ -53,7 +73,7 @@ export async function ensureSchema() {
       id         bigserial primary key,
       token      text        not null,
       status     text        not null,          -- running | done | stopped
-      pot_wei    numeric(78, 0),
+      pot        numeric(78, 0),                -- lamports on the working wallet
       operator   text,
       started_at timestamptz not null default now(),
       ended_at   timestamptz,
@@ -75,17 +95,27 @@ export async function ensureSchema() {
 
   await q(`
     create table if not exists epoch_steps (
-      run_id  bigint      not null references epoch_runs (id) on delete cascade,
-      key     text        not null,
-      status  text        not null,             -- sending | ok | failed
-      nonce   integer,
-      hash    text,
-      detail  text,
-      at      timestamptz not null default now(),
+      run_id      bigint      not null references epoch_runs (id) on delete cascade,
+      key         text        not null,
+      status      text        not null,         -- sending | ok | failed
+      signature   text,                         -- the signature of the transaction, base58
+      valid_until bigint,                       -- the block height past which it will not go through
+      detail      text,
+      at          timestamptz not null default now(),
       primary key (run_id, key)
     );
   `);
   await q(`create index if not exists epoch_steps_run on epoch_steps (run_id);`);
+
+  /* The database on Railway is older than this code: the columns of the
+     previous chain are sitting in it (hash, nonce, pot_wei). We pour the
+     new ones into the old table and leave the old ones alone, because
+     dropping a column with the records of past runs means erasing the
+     history that somebody will one day have to work through. The old ones
+     stay empty and nobody reads them. */
+  await q(`alter table epoch_steps add column if not exists signature text;`);
+  await q(`alter table epoch_steps add column if not exists valid_until bigint;`);
+  await q(`alter table epoch_runs  add column if not exists pot numeric(78, 0);`);
 }
 
 /* =========================================================================
@@ -98,7 +128,7 @@ export async function ensureSchema() {
  * Returns { run, resumed, done }, where done is the set of step names that
  * are already finished and have to be skipped.
  */
-export async function openRun({ token, potWei, operator }) {
+export async function openRun({ token, pot, operator }) {
   await ensureSchema();
 
   const open = (await q(
@@ -117,9 +147,9 @@ export async function openRun({ token, potWei, operator }) {
   }
 
   const run = (await q(
-    `insert into epoch_runs (token, status, pot_wei, operator)
+    `insert into epoch_runs (token, status, pot, operator)
      values ($1, 'running', $2, $3) returning *`,
-    [token, potWei === undefined || potWei === null ? null : String(potWei), operator || null]
+    [token, pot === undefined || pot === null ? null : String(pot), operator || null]
   )).rows[0];
 
   return { run, resumed: false, done: new Set(), pending: [] };
@@ -137,21 +167,22 @@ export async function closeRun(runId, status, note) {
    ========================================================================= */
 
 /**
- * Perform a step once in the whole life of the run.
+ * Execute a step once in the whole life of a run.
  *
- * `send` has to return the send record from Sender, with the fields hash
- * and nonce. The order here matters and it is exactly this one:
+ * `send` is obliged to return the send record from Sender, with the fields
+ * signature and lastValidBlockHeight. The order here matters and it is
+ * exactly this:
  *
  *   1. claim the step in the database as "sending". If one like it already
- *      exists, the primary key will not allow it, and we find that out
+ *      exists, the primary key will not allow it, and we learn about that
  *      BEFORE spending money;
  *   2. send;
  *   3. write down how it ended.
  *
  * The reverse order, send first and write afterwards, leaves a window in
- * which the money is gone and there is no record. It is short, but that is
- * exactly the window a fall lands in: transactions live for seconds in the
- * network, and a database write takes milliseconds.
+ * which the money has left and there is no record. It is short, but it is
+ * exactly the window a fall lands in: transactions live in the network for
+ * seconds, and a write to the database for milliseconds.
  */
 export async function runStep(runId, key, send, { done } = { done: new Set() }) {
   if (done.has(key)) return { skipped: true, key };
@@ -182,60 +213,202 @@ export async function runStep(runId, key, send, { done } = { done: new Set() }) 
   }
 
   await q(
-    `update epoch_steps set status = 'ok', hash = $3, nonce = $4, at = now()
+    `update epoch_steps set status = 'ok', signature = $3, valid_until = $4, at = now()
      where run_id = $1 and key = $2`,
-    [runId, key, rec.hash || null, rec.nonce ?? null]
+    [runId, key, rec.signature || null, rec.lastValidBlockHeight ?? null]
   );
   done.add(key);
   return { ...rec, key };
 }
 
 /* =========================================================================
-   Sorting out stuck steps
+   A BATCH OF STEPS IN ONE TRANSACTION
+
+   On Solana about ten transfers fit into one transaction, and that is no
+   small economy: a thousand holders across ten coins is ten thousand
+   transfers, that is, the difference between a thousand transactions and
+   ten thousand.
+
+   But the journal becomes more complicated because of it, and the
+   complication here is a dangerous one. The simple path, one step per
+   transaction with a name of the form `xfer:PUMP:batch3`, breaks exactly
+   where the journal is needed. The holder list changes between two
+   attempts (somebody sold, somebody bought), the batches get reassembled,
+   and "batch3" in a new run already means different people. A repeat would
+   pay again the people who must not be paid, and would not pay the ones
+   who must.
+
+   So the name of a step stays BY NAME, as it was: `xfer:PUMP:<address>`.
+   One transaction simply closes several names at once: all of them are
+   claimed before sending, and all of them are marked with one and the same
+   signature.
+
+   What that gives: the batches can be reassembled however you like, in any
+   order and of any size, while the protection against a second payment
+   stays by name. And if the previous run managed to pay part of the list,
+   the new one simply assembles batches out of those who are left.
+   ========================================================================= */
+
+/**
+ * Execute a batch of steps with one send.
+ *
+ * The order is the same as in runStep, and for the same reason: first
+ * claim all the names, then send, then write down the result.
+ *
+ * If even one name is already claimed by somebody else, the batch is not
+ * sent at all: that means somebody has already taken it, and sending now
+ * is exactly the second payment this whole file is about.
+ */
+export async function runBatch(runId, keys, send, { done } = { done: new Set() }) {
+  const todo = keys.filter(k => !done.has(k));
+  if (!todo.length) return { skipped: true, keys };
+
+  const claimed = [];
+  for (const key of todo) {
+    try {
+      await q(`insert into epoch_steps (run_id, key, status) values ($1, $2, 'sending')`,
+              [runId, key]);
+      claimed.push(key);
+    } catch (e) {
+      if (e.code === '23505') {
+        /* The name is taken. Rolling back the ones already claimed is not
+           allowed, they are ours, and cancelling them means permitting a
+           repeat. We send what we managed to claim and leave what is taken
+           to the previous run. */
+        break;
+      }
+      throw e;
+    }
+  }
+  if (!claimed.length) return { skipped: true, keys, alreadyClaimed: true };
+
+  let rec;
+  try {
+    rec = await send(claimed);
+  } catch (e) {
+    await q(`update epoch_steps set status = 'failed', detail = $3, at = now()
+             where run_id = $1 and key = any($2)`,
+            [runId, claimed, String(e.message || e).slice(0, 500)]);
+    throw e;
+  }
+
+  await q(`update epoch_steps set status = 'ok', signature = $3, valid_until = $4, at = now()
+           where run_id = $1 and key = any($2)`,
+          [runId, claimed, rec.signature || null, rec.lastValidBlockHeight ?? null]);
+  for (const k of claimed) done.add(k);
+  return { ...rec, keys: claimed };
+}
+
+/* =========================================================================
+   Working out stuck steps
    ========================================================================= */
 
 /**
  * What actually happened to a step marked "sending".
  *
  * Returns one of:
- *   mined     went through, can be counted as done
- *   dropped   did not go through and the nonce is free, can be repeated
+ *   mined     it went through, it can be counted as done
+ *   dropped   it did not go through and can no longer do so, a retry is
+ *             safe
+ *   pending   it may still go through, wait
  *   unknown   there is no unambiguous answer, a human is needed
  *
- * The third case exists not for completeness but because it happens: a
- * node can lose a receipt, and the wallet nonce could have been moved by
- * anyone who holds the key. Writing "probably went through" here means
- * paying twice one day.
+ * The last case is all but impossible on this chain and is left for
+ * exactly one thing: the record was made by an old version of the crank
+ * and there is no hash lifetime with it. Then an answer is impossible, and
+ * the crank calls a human instead of guessing.
  */
 export async function resolveStep(step, operator) {
-  if (!step.hash) {
-    /* There is no hash at all: the step was claimed but never got as far
-       as being sent. That happens when the process dies between two lines.
-       Repeating it is safe. */
-    return { verdict: 'dropped', why: 'the step was claimed but never sent' };
+  const sig = step.signature || null;
+  if (!sig) {
+    /* There is no signature at all: the step was claimed but never got as
+       far as being sent. That happens when the process died between two
+       lines. A retry is safe. */
+    return { verdict: 'dropped', why: 'the step was claimed, but it was never sent' };
   }
 
-  const receipt = await rpc('eth_getTransactionReceipt', [step.hash]).catch(() => null);
-  if (receipt) {
-    return BigInt(receipt.status) === 1n
-      ? { verdict: 'mined', receipt }
-      : { verdict: 'dropped', why: 'the transaction was mined but reverted', receipt };
+  const st = await rpc('getSignatureStatuses', [[sig], { searchTransactionHistory: true }])
+    .catch(() => null);
+  const s = st && st.value && st.value[0];
+  if (s) {
+    return s.err
+      ? { verdict: 'dropped', why: 'the transaction was accepted, but it executed with an error: '
+                                 + JSON.stringify(s.err), status: s }
+      : { verdict: 'mined', status: s };
   }
 
-  if (step.nonce === null || step.nonce === undefined) {
-    return { verdict: 'unknown', why: 'no receipt and no nonce recorded' };
+  /* The signature is not in the chain. Whether its blockhash is still
+     alive is decided by the height. */
+  const until = step.valid_until;
+  if (until === null || until === undefined) {
+    return { verdict: 'unknown',
+             why: 'the signature is not in the chain, and no hash lifetime was written down with the step. '
+                + 'This is a record from an old version of the crank: an answer is impossible' };
   }
 
-  const mined = Number(BigInt(await rpc('eth_getTransactionCount', [operator, 'latest'])));
-  if (mined > step.nonce) {
-    return {
-      verdict: 'unknown',
-      why: 'no receipt, but the wallet nonce has moved past ' + step.nonce
-         + '. Some transaction with that nonce went through, check by hand '
-         + 'whether it was this one before letting the crank continue.',
-    };
+  const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }])
+    .catch(() => 0));
+  if (!height) {
+    return { verdict: 'unknown', why: 'the node did not tell us the block height, there is nothing to decide with' };
   }
-  return { verdict: 'dropped', why: 'no receipt and the nonce is still free' };
+  if (height > Number(until)) {
+    /* The main place in the file. The hash has expired, so the transaction
+       CAN NEVER go through, and that is a property of the chain, not a
+       hope of ours. A retry is safe, and there is no need to call a
+       human. */
+    return { verdict: 'dropped',
+             why: 'no signature, the blockhash expired at height ' + until
+                + ' (now ' + height + '), it can no longer go through' };
+  }
+  return { verdict: 'pending',
+           why: 'no signature yet, but the hash is alive until height ' + until
+              + ' (now ' + height + '), it may still go through' };
+}
+
+/* =========================================================================
+   WRITING THE EPOCH TO THE SHOP WINDOW
+
+   The epochs table is what the site reads: it is the very line "paid in
+   kind across N epochs". On the previous chain the server filled it,
+   re-reading the transfers off the explorer, which is to say the shop
+   window showed the chain rather than our report.
+
+   On Solana there is no explorer with free transfer history, and the node
+   is asked for history one transaction per request: an epoch for a
+   thousand holders is several hundred transactions, and the public node
+   will not allow re-reading them every five minutes (see the comment in
+   server/collect.js).
+
+   So the crank writes, and it writes exactly what it sent. This is a
+   self-report, and calling it reading the chain would be untrue. What
+   makes it verifiable: every row holds the signature of the transaction.
+   With it anyone opens the transaction in an explorer and checks the
+   amount. The check stayed possible, it is just the reader who does it
+   rather than us on his behalf.
+
+   The key is the signature, so writing the same transaction again
+   duplicates nothing. That matters for a run that broke off: it will
+   finish, reach the writing again, and spoil nothing.
+   ========================================================================= */
+
+/**
+ * @param rows [{ signature, slot, symbol, token, amount }]
+ */
+export async function recordEpoch(rows) {
+  let added = 0;
+  for (const r of rows || []) {
+    if (!r || !r.signature) continue;
+    const res = await q(
+      `insert into epochs (signature, at, slot, symbol, token, amount, raw)
+       values ($1, now(), $2, $3, $4, $5, $6)
+       on conflict (signature) do nothing`,
+      [r.signature, r.slot ?? null, r.symbol ?? null, r.token ?? null,
+       Number.isFinite(r.amount) ? r.amount : null,
+       JSON.stringify({ recipients: r.recipients ?? null, runId: r.runId ?? null })]
+    );
+    added += res.rowCount;
+  }
+  return added;
 }
 
 /** Everything about a run in one piece, for the report and for the console. */

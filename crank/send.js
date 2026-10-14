@@ -1,425 +1,509 @@
 /* =========================================================================
-   SIGNING AND SENDING
+   Signing and sending. The only file that touches the key.
 
-   Everything that spends money passes through here and nowhere else. The
-   rest of the crank only reads and computes.
+   WHAT IS DIFFERENT HERE COMPARED WITH THE PREVIOUS CHAIN
 
-   WHY A LIBRARY AND NOT OUR OWN CODE. Signing a transaction is secp256k1,
-   keccak, RLP and the EIP-1559 rules. You can write that yourself, and it
-   will even work on the first test; the mistake shows up on a rare input
-   and costs a wallet. The one place in the project where our own
-   implementation is unacceptable in principle is this one. Hence ethers:
-   it is proven by the billions that have gone through it.
+   On EVM a transaction had a sequence number, the nonce, and it was the
+   source of half the difficulties: the number was taken by the signing and
+   not by the sending, two transactions with the same number ruled each
+   other out, and a vanished transaction left a question without an answer.
+   Had it not been accepted yet, or had another one with the same number
+   already been accepted? The previous version of the journal honestly
+   wrote "unknown" about such a step and stopped the crank, because
+   continuing meant possibly paying twice.
 
-   Everything else, the queue, the ceilings, the retries, the waiting, is
-   written here, because that is about OUR rules and not about cryptography.
+   On Solana that question does not exist, and this is the main improvement
+   of the move. A transaction is tied to a recent blockhash, and the hash
+   lives about a minute (roughly 150 slots). While it is alive, the
+   transaction may go through; as soon as the block height has passed
+   `lastValidBlockHeight`, it CAN NEVER go through. So a vanished step has
+   an exact answer rather than a guess:
 
-   THE FOUR RULES THAT GOVERN THIS FILE
+     the signature turned up in the chain  → it went through
+     no signature, the hash is still alive → in flight, we wait
+     no signature, the hash has expired    → it did NOT go through, a
+                                             retry is safe
 
-   1. The key has to match the operator address. It does not match, we do
-      not work. A key from the wrong wallet means the money arrives
-      somewhere other than where the plan computed; better to stop in the
-      first second than halfway through the payout.
+   The third line is what EVM did not have. So there is no "unknown"
+   verdict left here at all, and the crank no longer stops over a question
+   that can be answered.
 
-   2. The nonce is kept by us, not asked for before every send. The node
-      answers with a delay, and two transactions in a row would get the
-      same nonce: the second would silently replace the first.
+   ONE NODE FOR THE WHOLE CRANK
 
-   3. A ceiling on the gas price. The crank wakes up by the clock, not by
-      reason: if it woke up during a spike, it has to refuse and wait for
-      the next time rather than hand the epoch to the network.
+   Sending goes through the same `rpc` from read.js, not through Connection
+   from the library. That is on purpose: Connection would set up a second
+   path to the network with its own timeouts, its own retries and its own
+   node address, and it would go around the seam for the checks
+   (`globalThis.__rpcHook`). Then the send layer would only be checked
+   against a live chain, which is to say it would not be checked.
 
-   4. A transaction went missing: do NOT send it again. This is the most
-      expensive temptation in code like this. No confirmation arrived, so
-      we go and look by nonce whether it already went through; sending a
-      second time means paying twice.
+   The library is used exactly where it cannot be replaced: assembling the
+   message, deriving the addresses of accounts, signing. All of that is
+   pure arithmetic and needs no network.
    ========================================================================= */
 
-import { Wallet, Transaction, getAddress, keccak256, AbiCoder } from 'ethers';
-import { rpc, ADDR } from './read.js';
+import './../core.js';
+import bs58 from 'bs58';
+import {
+  Keypair, PublicKey, TransactionMessage, VersionedTransaction,
+  ComputeBudgetProgram, TransactionInstruction,
+} from '@solana/web3.js';
+import {
+  TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedInstruction,
+} from '@solana/spl-token';
+import { rpc, PROG, JUP, SLIPPAGE_BPS } from './read.js';
+import { COST } from './plan.js';
 
 const C = globalThis.ApexCore;
 
-/* The ceiling on the gas price.
+/* =========================================================================
+   THE CEILINGS
 
-   Measured on August 29 against live blocks: the base price is 0.069 to
-   0.090 gwei and barely moves, checked at the head of the chain and at
-   blocks a hundred, a thousand, ten thousand and a hundred thousand back.
-   What used to stand here was "around 0.0005 gwei"; that was wrong by a
-   factor of a hundred and forty, and the whole estimate of what an epoch
-   costs was built on that number.
+   A ceiling is needed not against the greed of the network but against our
+   own mistake. A calculation that put the priority fee a thousand times
+   higher than needed would spend the whole float on gas and stop in the
+   middle of the payout. The ceiling turns that into a refusal before the
+   first signature.
+   ========================================================================= */
 
-   5 gwei is seventy-odd of the current prices. The point is not fine
-   tuning but catching an obvious anomaly: a broken node that returned
-   nonsense, or a real storm. */
-export const MAX_GAS_PRICE_WEI = 5_000_000_000n;      // 5 gwei
+/** The priority fee, in microlamports per compute unit. */
+export const PRIORITY_MICRO = 1_000n;
 
-/* How long to wait for a confirmation before going to investigate. */
+/** The ceiling on the priority fee. Above it: a refusal, not a signature. */
+export const MAX_PRIORITY_MICRO = 50_000n;
+
+/* HOW MANY COMPUTE UNITS TO ASK FOR, AND WHY NOT "A BIT MORE, JUST IN
+ * CASE".
+ *
+ * At first there was 400 000 here, with a margin, without looking. That is
+ * a mistake, and a mistake you pay for: the priority fee is charged on the
+ * REQUESTED ceiling, not on what was consumed. Asking for a sevenfold
+ * margin means paying seven times over for the queue on every transaction
+ * of the payout.
+ *
+ * Measured on the live chain on October 14: a transfer is about 1 900
+ * units, creating an account is 14 818. Hence the ceilings below, each
+ * with a twofold margin in case of a coin with Token-2022 extensions,
+ * which is dearer than an ordinary one. */
+export const CU_TRANSFERS = 60_000;   // 15 transfers is about 28 000
+export const CU_CREATES = 120_000;    // 6 accounts is about 89 000
+
+/** How many transfers we put into one transaction.
+ *
+ *  The number lives in plan.js and is taken from there instead of being
+ *  repeated here: the cost calculation and the payout itself are obliged
+ *  to count batches the same way. Let them diverge and the console would
+ *  promise one number of transactions while the crank made another, and
+ *  that would come apart silently. */
+export const TRANSFERS_PER_TX = COST.transfersPerTx;
+
+/** How many accounts we create in one transaction. Measured: twelve fit by
+ *  size (1204 bytes out of 1232), but they eat 178 000 units. Six fits
+ *  with a twofold margin on size and fits on compute as well. */
+export const CREATES_PER_TX = 6;
+
+/** How long we wait for a confirmation before treating the hash as expired. */
 export const WAIT_MS = 90_000;
-const POLL_MS = 2_000;
-
-/* Margin on top of the gas estimate. The estimate is made against the
-   current state of the network, and the transaction will execute against
-   the next one: by then the state has shifted, and the exact estimate may
-   not be enough. 25% is the usual practice. */
-const GAS_HEADROOM = 125n;
 
 /* =========================================================================
-   The wallet
+   THE KEY
+
+   Three forms of writing it down, and all three occur in life. We parse
+   them all, because a person will paste the one his wallet gave him, not
+   the one we would have preferred.
    ========================================================================= */
 
 /**
- * Prepares the signer. Throws if the key is from the wrong address.
+ * A keypair out of a string. If `expected` is given, the address has to
+ * match.
  *
- * @param key       the operator's private key
- * @param expected  the address it is obliged to turn out to be
+ * The comparison is no formality. Let the key diverge from the declared
+ * operator and the crank would compute the shares from the balance of one
+ * wallet while paying from another, and that would get noticed on the
+ * first transfer where the money ran out, which is to say in the middle of
+ * the payout.
  */
 export function operatorFrom(key, expected) {
-  if (!key) throw new Error('the operator key is not set');
-  let w;
-  try {
-    w = new Wallet(key.startsWith('0x') ? key : '0x' + key);
-  } catch (_) {
-    /* The message is deliberately without detail: nothing must reach the
-       log by which the key could be recovered or the search narrowed. */
-    throw new Error('the operator key is unreadable');
+  const raw = String(key || '').trim();
+  if (!raw) throw new Error('the private key is not set (APEX_WALLET_KEY)');
+
+  let bytes = null;
+
+  /* 1. An array of 64 numbers, that is how it sits in the id.json file
+        from solana-keygen. */
+  if (raw.startsWith('[')) {
+    let arr;
+    try { arr = JSON.parse(raw); } catch (_) { arr = null; }
+    if (!Array.isArray(arr) || (arr.length !== 64 && arr.length !== 32)) {
+      throw new Error('the key looks like an array, but it does not hold 64 or 32 numbers');
+    }
+    bytes = Uint8Array.from(arr);
   }
-  if (expected && getAddress(w.address) !== getAddress(expected)) {
-    throw new Error('the key belongs to ' + w.address + ', but the operator is ' + expected);
+  /* 2. A hundred and twenty-eight hexadecimal characters, that is, 64
+        bytes. */
+  else if (/^(0x)?[0-9a-fA-F]{128}$/.test(raw)) {
+    const h = raw.replace(/^0x/, '');
+    bytes = Uint8Array.from(h.match(/../g).map(b => parseInt(b, 16)));
   }
-  return w;
+  /* 3. base58, the most common form, that is how wallets hand it out. */
+  else {
+    let d;
+    try { d = bs58.decode(raw); } catch (_) {
+      throw new Error('the key did not parse: it is not base58, not hex and not an array of numbers');
+    }
+    if (d.length !== 64 && d.length !== 32) {
+      throw new Error('the key in base58 is ' + d.length + ' bytes long, and it has to be 64 or 32');
+    }
+    bytes = d;
+  }
+
+  /* Thirty-two bytes is a seed, not a full key: the pair is derived from
+     it. Sixty-four is the whole pair. We accept both. */
+  const kp = bytes.length === 32
+    ? Keypair.fromSeed(bytes)
+    : Keypair.fromSecretKey(bytes);
+
+  const addr = kp.publicKey.toBase58();
+  if (expected && addr !== String(expected).trim()) {
+    throw new Error(
+      'the key is not from the declared wallet.\n'
+      + '    the key gives:   ' + addr + '\n'
+      + '    in the settings: ' + expected + '\n'
+      + '    The shares are computed from the balance of one address, and the crank\n'
+      + '    would pay from another. That adds up exactly until the first transfer.');
+  }
+  return kp;
 }
 
 /* =========================================================================
-   The send queue
+   THE ADDRESSES OF TOKEN ACCOUNTS
 
-   One instance per one pass of an epoch. Keeps the nonce and makes sure
-   transactions leave strictly one after another.
-
-   Sequentially and not in a batch: the steps of an epoch are linked, first
-   take the fee, then swap, then buy, then hand out. Sending them all at
-   once means sending the buy before the money appeared on the wallet, and
-   paying for the failure.
+   They are derived, not looked up: the address of a token account is
+   determined unambiguously by the coin, the owner and the program of the
+   coin. So "does the account exist" is checked with a single read by a
+   ready address, not by searching the chain.
    ========================================================================= */
+
+const pk = (x) => (x instanceof PublicKey ? x : new PublicKey(x));
+
+/** The program of the coin as a library object, by the string from the chain. */
+export function programOf(ownerProgram) {
+  if (ownerProgram === PROG.token2022) return TOKEN_2022_PROGRAM_ID;
+  if (ownerProgram === PROG.token) return TOKEN_PROGRAM_ID;
+  throw new Error('unknown program of the coin: ' + ownerProgram);
+}
+
+/** The address of an owner's token account for a coin. */
+export function ataFor(mint, owner, ownerProgram = PROG.token) {
+  return getAssociatedTokenAddressSync(
+    pk(mint), pk(owner), /* allowOwnerOffCurve */ true, programOf(ownerProgram),
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  ).toBase58();
+}
+
+/**
+ * The instruction that creates an account, IDEMPOTENT, and that matters.
+ *
+ * Ordinary creation fails if the account already exists. For the crank
+ * that means a run broken off halfway would, on the retry, fail on the
+ * very first account already created, and the payout would never go any
+ * further. The idempotent version simply does nothing in that case, and a
+ * retry becomes safe in itself, without the journal.
+ */
+export function ixCreateAta({ payer, owner, mint, ownerProgram = PROG.token }) {
+  return createAssociatedTokenAccountIdempotentInstruction(
+    pk(payer), pk(ataFor(mint, owner, ownerProgram)), pk(owner), pk(mint),
+    programOf(ownerProgram), ASSOCIATED_TOKEN_PROGRAM_ID,
+  );
+}
+
+/**
+ * A transfer of a coin. `transferChecked`, not `transfer`, on purpose: the
+ * checked version requires the decimals to be stated and compares them
+ * against the coin. Get the decimals wrong and we get a refusal rather
+ * than a transfer of the wrong amount. The difference between those two
+ * outcomes is the whole point of this line.
+ */
+export function ixTransfer({ mint, from, to, owner, amount, decimals,
+                             ownerProgram = PROG.token }) {
+  return createTransferCheckedInstruction(
+    pk(from), pk(mint), pk(to), pk(owner), amount, decimals, [],
+    programOf(ownerProgram),
+  );
+}
+
+/* =========================================================================
+   THE PURCHASE: A READY TRANSACTION FROM JUPITER
+
+   The quote is taken in read.js (a pure read), and the transaction here:
+   it has to be signed.
+
+   We take a ready one instead of assembling it ourselves. Assembling it
+   would require knowing the call format of every venue the route went
+   through, which is to say writing an aggregator. What we sign, mind you,
+   is only what the aggregator hands back for our own route, with our
+   wallet as the payer. That is not checked by trust but by the slippage
+   allowance: however much cunning there is in the route, less than
+   `minOut` will not reach us.
+   ========================================================================= */
+
+export async function swapTx({ route, owner, priorityMicro = PRIORITY_MICRO }) {
+  const res = await fetch(JUP.swap, {
+    method: 'POST',
+    headers: { ...JUP.headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: route,
+      userPublicKey: String(owner),
+      /* Wrapping and unwrapping SOL is asked for by Jupiter itself: we pay
+         in native SOL, and the pools trade the wrapped one. It also closes
+         the wrapper at the end of the same transaction, so no extra
+         account is left behind. */
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: Number(priorityMicro) * 200,
+    }),
+    signal: AbortSignal.timeout(25_000),
+  });
+  if (!res.ok) throw new Error('Jupiter did not give the transaction: ' + res.status);
+  const d = await res.json();
+  if (!d || !d.swapTransaction) throw new Error('Jupiter did not give the transaction');
+  return VersionedTransaction.deserialize(Buffer.from(d.swapTransaction, 'base64'));
+}
+
+/* =========================================================================
+   THE SENDER
+   ========================================================================= */
+
+/** In batches of n. Pulled out separately, because it is checked separately. */
+export function batch(items, n) {
+  const out = [];
+  for (let i = 0; i < items.length; i += n) out.push(items.slice(i, i + n));
+  return out;
+}
 
 export class Sender {
-  constructor(wallet, { chainId = C.CHAIN.id, maxGasPriceWei = MAX_GAS_PRICE_WEI,
-                        dry = false, waitMs = WAIT_MS } = {}) {
-    this.w = wallet;
-    this.chainId = BigInt(chainId);
-    this.maxGasPriceWei = maxGasPriceWei;
+  /**
+   * @param wallet  the operator's keypair
+   * @param dry     a dry run: it assembles and counts, but does not send
+   */
+  /* `waitMs` and `pollMs` are in the settings exactly for the sake of the
+     checks: waiting ninety seconds in a test means not writing the test at
+     all, and the behavior with an expired hash and with a vanished
+     transaction is the main thing that has to be checked here. In live
+     mode both keep their own values. */
+  constructor(wallet, { dry = true, priorityMicro = PRIORITY_MICRO,
+                        waitMs = WAIT_MS, pollMs = 2500 } = {}) {
+    if (BigInt(priorityMicro) > MAX_PRIORITY_MICRO) {
+      throw new Error('the priority fee ' + priorityMicro
+        + ' is above the ceiling of ' + MAX_PRIORITY_MICRO + ', which is almost certainly a calculation error');
+    }
+    this.wallet = wallet;
     this.dry = dry;
-    /* The waiting time is a field and not a constant: otherwise the test
-       for a "missing transaction" would have to wait a minute and a half,
-       and it simply would not be run. */
     this.waitMs = waitMs;
-    this.nonce = null;
-    this.sent = [];             // what left during this pass, for the report and the post-mortem
+    this.pollMs = pollMs;
+    this.priorityMicro = BigInt(priorityMicro);
+    this.fees = 0n;
+    this.sent = 0;
   }
 
-  /** The nonce is taken once per pass and after that it grows on our side. */
-  async start() {
-    const n = await rpc('eth_getTransactionCount', [this.w.address, 'pending']);
-    this.nonce = Number(BigInt(n));
-    return this.nonce;
+  /** How much was paid in signature fees by this run. */
+  spentLamports() { return this.fees; }
+
+  /** A fresh blockhash and how long it lives. */
+  async blockhash() {
+    const r = await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
+    const v = r && r.value ? r.value : r;
+    if (!v || !v.blockhash) throw new Error('the node did not give a blockhash');
+    return { blockhash: v.blockhash, lastValidBlockHeight: Number(v.lastValidBlockHeight) };
+  }
+
+  /** Assemble a transaction out of instructions and sign it. */
+  async build(ixs, { cu = null } = {}) {
+    const head = [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Number(this.priorityMicro) }),
+    ];
+    if (cu) head.push(ComputeBudgetProgram.setComputeUnitLimit({ units: cu }));
+
+    const { blockhash, lastValidBlockHeight } = await this.blockhash();
+    const msg = new TransactionMessage({
+      payerKey: this.wallet.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [...head, ...ixs],
+    }).compileToV0Message();
+    const tx = new VersionedTransaction(msg);
+    tx.sign([this.wallet]);
+    return { tx, lastValidBlockHeight };
   }
 
   /**
-   * The gas price with the ceiling check.
+   * Send. Takes either an array of instructions or a ready transaction
+   * (that is how a swap arrives from Jupiter).
    *
-   * This network has no fee market in the usual sense, so we take
-   * eth_gasPrice and pay it as maxFeePerGas. We keep the priority part
-   * equal to the price: with no competition it is the whole price, and
-   * shaving it means hanging in the queue for an indefinite time.
+   * Returns { signature, lastValidBlockHeight }. The journal writes down
+   * both, and the second matters more than the first: it is what later
+   * decides whether the transaction vanished or is still in flight.
    */
-  async gas() {
-    const p = BigInt(await rpc('eth_gasPrice'));
-    if (p > this.maxGasPriceWei) {
-      throw new Error('gas price ' + p + ' wei is above the ceiling '
-        + this.maxGasPriceWei + ' wei, skipping this pass');
+  async send(what, { cu = null } = {}) {
+    let tx, lastValidBlockHeight;
+
+    if (Array.isArray(what)) {
+      ({ tx, lastValidBlockHeight } = await this.build(what, { cu }));
+    } else {
+      /* A ready transaction from Jupiter: it already has a blockhash of
+         its own, and changing it is not allowed, that would break its own
+         signature over the address tables. We sign it as it is and take
+         the deadline from the node. */
+      tx = what;
+      tx.sign([this.wallet]);
+      const h = await rpc('getBlockHeight', [{ commitment: 'confirmed' }]).catch(() => null);
+      lastValidBlockHeight = Number(h || 0) + 150;
     }
-    return p;
-  }
 
-  /**
-   * The gas estimate for one particular call.
-   *
-   * The estimate is made BEFORE sending and not silently: if the node says
-   * the call will not go through, then our plan has diverged from the
-   * state of the chain, and it is better to learn that here than to pay
-   * for a failed transaction.
-   */
-  async estimate({ to, data = '0x', value = 0n }) {
-    const hex = v => '0x' + BigInt(v).toString(16);
-    const g = await rpc('eth_estimateGas', [{
-      from: this.w.address, to, data, value: hex(value),
-    }]);
-    return (BigInt(g) * GAS_HEADROOM) / 100n;
-  }
+    const wire = Buffer.from(tx.serialize()).toString('base64');
+    const signature = bs58.encode(tx.signatures[0]);
 
-  /**
-   * Sign and send one call. Returns the hash and the nonce.
-   *
-   * `label` is the human name of the step. It goes into the report and
-   * into the journal, and by it you can afterwards see where exactly the
-   * pass stopped.
-   */
-  async send({ to, data = '0x', value = 0n, gasLimit = null, label = '' }) {
-    if (this.nonce === null) await this.start();
-
-    const gasPrice = await this.gas();
-    const limit = gasLimit ?? await this.estimate({ to, data, value });
-
-    const tx = Transaction.from({
-      type: 2,
-      chainId: this.chainId,
-      nonce: this.nonce,
-      to: getAddress(to),
-      value: BigInt(value),
-      data,
-      gasLimit: limit,
-      maxFeePerGas: gasPrice,
-      maxPriorityFeePerGas: gasPrice,
-    });
-
-    const raw = await this.w.signTransaction(tx);
-    const hash = keccak256(raw);
-    const rec = { label, hash, nonce: this.nonce, gasLimit: limit, gasPrice };
-
-    /* A dry run gets AS FAR AS this place: it signs for real and computes
-       the hash, but does not send. That is how the whole path is checked,
-       including the gas estimate and the assembly of the call, without a
-       single wei spent. */
     if (this.dry) {
-      rec.dry = true;
-      this.nonce += 1;
-      this.sent.push(rec);
-      return rec;
+      /* A dry run does not send, but it does not pretend either. It
+         SIMULATES: the node executes the transaction at its end and
+         answers whether it would have gone through. That is exactly what
+         the previous version lacked, there a dry run only printed the
+         intention, and an error in the assembled call was discovered by
+         the first live signature. */
+      const sim = await rpc('simulateTransaction',
+        [wire, { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true }])
+        .catch(e => ({ value: { err: e.message || String(e) } }));
+      const v = (sim && sim.value) || sim || {};
+      if (v.err) {
+        throw new Error('the simulation did not pass: ' + JSON.stringify(v.err)
+          + (v.logs && v.logs.length ? '\n    ' + v.logs.slice(-3).join('\n    ') : ''));
+      }
+      this.sent++;
+      return { signature, lastValidBlockHeight, dry: true, units: v.unitsConsumed ?? null };
     }
 
-    await rpc('eth_sendRawTransaction', [raw]);
-    this.nonce += 1;
-    this.sent.push(rec);
+    /* maxRetries: 0 on purpose. The retries are our own business, in
+       `confirm`: a node that retries silently deprives us of the knowledge
+       of how many times the transaction went out, and the journal needs
+       that knowledge. */
+    await rpc('sendTransaction', [wire, {
+      encoding: 'base64', skipPreflight: false, maxRetries: 0,
+      preflightCommitment: 'confirmed',
+    }]);
 
-    const receipt = await this.wait(hash, rec.nonce);
-    rec.receipt = receipt;
-    rec.ok = receipt && BigInt(receipt.status) === 1n;
-    if (!rec.ok) throw new Error('step "' + label + '" reverted on chain, hash ' + hash);
-    return rec;
+    this.sent++;
+    this.fees += BigInt(tx.signatures.length) * 5_000n;
+    return { signature, lastValidBlockHeight, wire };
   }
 
   /**
-   * Wait for the confirmation.
+   * Wait for the confirmation. Returns a verdict instead of throwing: a
+   * vanished transaction is a normal outcome, not an exception.
    *
-   * If there is no receipt within the allotted time, we do NOT send again.
-   * Instead we ask the network for the wallet's current nonce: if it has
-   * already passed the nonce of our transaction, the transaction went
-   * through, the node just has not handed over the receipt yet. Sending
-   * again at that moment is a second payment.
+   *   'ok'       it went through
+   *   'failed'   accepted, but it executed with an error
+   *   'dropped'  it did not go through and can no longer do so, a retry is
+   *              safe
    */
-  async wait(hash, nonce) {
+  async confirm(signature, lastValidBlockHeight, { wire = null } = {}) {
     const until = Date.now() + this.waitMs;
+    let resent = 0;
+
     while (Date.now() < until) {
-      const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
-      if (r) return r;
-      await new Promise(s => setTimeout(s, POLL_MS));
+      const st = await rpc('getSignatureStatuses', [[signature]]).catch(() => null);
+      const s = st && st.value && st.value[0];
+      if (s) {
+        if (s.err) return { verdict: 'failed', why: JSON.stringify(s.err) };
+        if (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized') {
+          return { verdict: 'ok', slot: s.slot };
+        }
+      }
+
+      /* The hash has expired, so the answer is final, and this is the very
+         answer that the previous chain did not have. */
+      const h = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }])
+        .catch(() => 0));
+      if (h && h > lastValidBlockHeight) {
+        return { verdict: 'dropped', why: 'the blockhash has expired, the transaction can no longer go through' };
+      }
+
+      /* While the hash is alive, it makes sense to send the same
+         byte-for-byte transaction once more: its signature is the same,
+         and it cannot execute twice. That is not a risk of paying twice
+         but a guard against a lost packet. */
+      if (wire && !this.dry && resent < 3) {
+        resent++;
+        await rpc('sendTransaction', [wire, { encoding: 'base64', skipPreflight: true,
+                                              maxRetries: 0 }]).catch(() => {});
+      }
+
+      await new Promise(r => setTimeout(r, this.pollMs));
     }
-    const mined = Number(BigInt(await rpc('eth_getTransactionCount', [this.w.address, 'latest'])));
-    if (mined > nonce) {
-      throw new Error('the transaction went through, but the node did not return a receipt in time. '
-        + 'Hash ' + hash + ', nonce ' + nonce + '. Check it by hand before the next pass, '
-        + 'sending it again would pay twice.');
-    }
-    throw new Error('no receipt in ' + (this.waitMs / 1000) + ' s and the nonce has not moved: '
-      + 'the transaction is stuck. Hash ' + hash + ', nonce ' + nonce + '.');
+    /* Time ran out while the hash is still alive: there is no answer yet.
+       This is the only case where we do not know, and it is honestly
+       called waiting. */
+    return { verdict: 'pending', why: 'no confirmation came within ' + (this.waitMs / 1000) + ' s' };
   }
 
-  /** What the pass actually cost. */
-  spentWei() {
-    return this.sent.reduce((a, r) => {
-      const used = r.receipt ? BigInt(r.receipt.gasUsed) : r.gasLimit;
-      return a + used * r.gasPrice;
-    }, 0n);
+  /** Send and wait. The usual path for every step except the journal's. */
+  /**
+   * Send and wait.
+   *
+   * NOT LANDING IS AN ERROR, NOT A VALUE. This used to return the verdict
+   * whatever it was, and that quietly broke the project's main defence.
+   *
+   * The journal marks a step done when the send RETURNS without throwing.
+   * And `settle` was returning `dropped`, `failed` and `pending` calmly,
+   * like any other result. So a batch of transfers the chain never took
+   * got an "ok" in the journal with a signature on it, counted as sent,
+   * went into the shop window, and on a resumed run was skipped FOREVER.
+   * The people in that batch would have got nothing, and nobody would
+   * have noticed: the journal would say they were paid.
+   *
+   * That is exactly the failure the journal was written for, approached
+   * from the other side: it guards against a second payment, and here the
+   * first one was being lost.
+   *
+   * So any verdict other than `ok` is an exception now. The step is
+   * marked failed, the run stops, and the next pass finishes exactly the
+   * names that were left open.
+   *
+   * Anyone who wants the verdict as a value has `send` and `confirm`
+   * separately: that is what they were split for.
+   */
+  async settle(what, opts = {}) {
+    const r = await this.send(what, opts);
+    if (r.dry) return { ...r, verdict: 'ok' };
+    const v = await this.confirm(r.signature, r.lastValidBlockHeight, { wire: r.wire });
+    if (v.verdict !== 'ok') {
+      throw Object.assign(
+        new Error('the transaction did not land: ' + v.verdict + (v.why ? ' (' + v.why + ')' : '')),
+        { verdict: v.verdict, signature: r.signature, lastValidBlockHeight: r.lastValidBlockHeight });
+    }
+    return { ...r, ...v };
   }
 }
 
 /* =========================================================================
-   Assembling the calls
+   WHY THERE IS NO WRAPPING, NO APPROVAL AND NO SWAP OF OUR OWN HERE
 
-   Call data is assembled here and not at the place of use: the selector,
-   the argument padding and the field order are the things that go wrong
-   silently and are discovered only by the gas already spent.
+   The previous version exported callWrap, callUnwrap, callApprove,
+   callSwapExactIn, callSwapV4, callCollectFees. Not one of them carries
+   over:
+
+     wrapping and unwrapping   Jupiter does itself, inside the swap;
+     approval                  is not needed on Solana, the owner signs
+                               himself;
+     a swap of our own         is replaced by the aggregator's route;
+     collecting the fee        is done by the owner with his wallet, not by
+                               the crank.
+
+   The last one is not an omission but the same two-wallet scheme that was
+   adopted on the previous chain: the crank's key controls only the float
+   on the working wallet. A leak costs the float, not the whole accrued
+   fee, and that is limited not by an agreement but by the fact that the
+   crank does not have the second key.
    ========================================================================= */
-
-const pad = v => BigInt(v).toString(16).padStart(64, '0');
-const addr = a => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-
-/* Selectors. Each one computed with keccak over the signature and checked,
-   not copied from somewhere: a mixed-up selector is not a compile error but
-   spent gas and a call to the wrong function. */
-const SEL = {
-  collectFees:      '0xa480ca79',   // collectFees(address)
-  deposit:          '0xd0e30db0',   // deposit()
-  withdraw:         '0x2e1a7d4d',   // withdraw(uint256)
-  approve:          '0x095ea7b3',   // approve(address,uint256)
-  transfer:         '0xa9059cbb',   // transfer(address,uint256)
-  exactInputSingle: '0x04e45aaf',   // see the note at callSwapExactIn
-  execute:          '0x3593564c',   // execute(bytes,bytes[],uint256) on the UniversalRouter
-};
-
-/* Native ether in V4 terms: the zero address. Not "no currency" but a
-   currency, and it always sorts first, which is why our token in a pair
-   with ether is almost always the second one. */
-const NATIVE = '0x0000000000000000000000000000000000000000';
-
-/* The router command and the actions inside it. The numbers are from
-   Uniswap, not from memory: Commands.V4_SWAP = 0x10,
-   Actions.SWAP_EXACT_IN_SINGLE = 0x06, SETTLE_ALL = 0x0c, TAKE_ALL = 0x0f. */
-const CMD_V4_SWAP = '10';
-const ACT = { swapExactInSingle: '06', settleAll: '0c', takeAll: '0f' };
-
-const POOL_KEY =
-  'tuple(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)';
-
-/* The addresses are taken straight from read.js: one list for the whole
-   project. A second copy of it here would mean two lists of the same
-   thing, and those diverge silently. */
-
-/** collectFees(address) on the Pons locker. */
-export function callCollectFees(token) {
-  return { to: ADDR.locker, data: SEL.collectFees + addr(token), label: 'collect the fee' };
-}
-
-/** deposit() on WETH: wrap ether. */
-export function callWrap(valueWei) {
-  return { to: ADDR.weth, data: SEL.deposit, value: valueWei, label: 'wrap ether' };
-}
-
-/** withdraw(uint256) on WETH: unwrap it back. */
-export function callUnwrap(amountWei) {
-  return { to: ADDR.weth, data: SEL.withdraw + pad(amountWei), label: 'unwrap ether' };
-}
-
-/** approve(spender, amount) on an ERC20. */
-export function callApprove(token, spender, amountWei) {
-  return {
-    to: token,
-    data: SEL.approve + addr(spender) + pad(amountWei),
-    label: 'approve ' + token.slice(0, 10),
-  };
-}
-
-/** transfer(to, amount) on an ERC20. */
-export function callTransfer(token, to, amountWei) {
-  return {
-    to: token,
-    data: SEL.transfer + addr(to) + pad(amountWei),
-    label: 'send ' + token.slice(0, 10) + ' → ' + to.slice(0, 10),
-  };
-}
-
-/**
- * exactInputSingle on the router.
- *
- * What is deployed on this network is SwapRouter02, read off the explorer,
- * the contract is verified. It has seven fields and NO deadline, unlike
- * the old SwapRouter. That is not a detail: the two versions have
- * different selectors, and a call against the wrong one simply will not
- * find the function.
- *
- *   SwapRouter02  exactInputSingle((address,address,uint24,address,
- *                 uint256,uint256,uint160))            → 0x04e45aaf
- *   the old one   the same list plus uint256 deadline  → 0x414bf389
- *
- * Both selectors were computed with keccak, not taken from memory.
- *
- * The field order is not rearranged: the encoding is positional, and
- * `amountOutMinimum` swapped with `sqrtPriceLimitX96` gives not an error
- * but a swap at any price.
- */
-/**
- * Buying on Uniswap V4 through the UniversalRouter.
- *
- * WHY NOT THE WAY V3 DOES IT. On V3 every pair has its own contract, and
- * the wallet calls the router with one function. On V4 all the pools sit
- * in one PoolManager, and it does not exchange coins on a direct call: it
- * unlocks and calls back into the code of whoever called it. A wallet has
- * no code, so the callback fails. That is why the swap goes through an
- * intermediary, the UniversalRouter.
- *
- * WHAT IS INSIDE. The router is given a list of commands and an input for
- * each of them:
- *
- *   execute(commands, inputs, deadline)
- *     commands = 0x10                      one command: swap on V4
- *     inputs[0] = (actions, params[])       what exactly to do inside it
- *       actions = 06 0c 0f                  swap, settle, take
- *       params[0] = the swap parameters
- *       params[1] = what we pay with and at most how much
- *       params[2] = what we take and at least how much
- *
- * Three actions and not one: on V4 a swap only moves debts around inside
- * the PoolManager. Not settling the debt reverts the whole transaction;
- * not taking what was bought leaves the coins in the PoolManager, and that
- * will look like a successful purchase after which nothing arrived.
- *
- * THE ENCODING IS SOMEONE ELSE'S, AND THAT IS ON PURPOSE. Nested `bytes[]`
- * by hand is exactly the place where a mistake does not break the call but
- * changes its meaning: "how much I pay" swapped with "how much I get at
- * least" gives not a refusal but a swap at any price. ethers does the
- * encoding, and it was not proven by us.
- *
- * NATIVE ETHER. If we pay with native ether, it goes in the value field of
- * the same transaction. Wrapped ether would require a chain of approvals
- * through Permit2, and that is deliberately absent here: all our V4 pools
- * are paired with native ether, and writing an unused path to other
- * people's money is not allowed.
- */
-export function callSwapV4({ key, token, amountIn, minOut, deadline }) {
-  if (String(key.hooks).toLowerCase() !== NATIVE) {
-    /* A pool with a hook can demand hookData we do not know, and can
-       refuse by its own rules. A refusal here is cheaper than a guess: the
-       seat stays without a purchase, and its share goes to the others. */
-    throw new Error('a pool with the hook ' + key.hooks + ': swapping through it is not written');
-  }
-
-  const t = String(token).toLowerCase();
-  const zeroForOne = key.currency0.toLowerCase() !== t;
-  const currencyIn  = zeroForOne ? key.currency0 : key.currency1;
-  const currencyOut = zeroForOne ? key.currency1 : key.currency0;
-
-  if (currencyIn.toLowerCase() !== NATIVE) {
-    throw new Error('we would have to pay with something other than native ether (' + currencyIn + ')');
-  }
-
-  const abi = AbiCoder.defaultAbiCoder();
-  const poolKey = [key.currency0, key.currency1, key.fee, key.tickSpacing, key.hooks];
-
-  const params = [
-    abi.encode(
-      ['tuple(' + POOL_KEY + ' poolKey,bool zeroForOne,uint128 amountIn,'
-        + 'uint128 amountOutMinimum,bytes hookData)'],
-      [[poolKey, zeroForOne, amountIn, minOut, '0x']]),
-    abi.encode(['address', 'uint256'], [currencyIn, amountIn]),
-    abi.encode(['address', 'uint256'], [currencyOut, minOut]),
-  ];
-
-  const actions = '0x' + ACT.swapExactInSingle + ACT.settleAll + ACT.takeAll;
-  const input = abi.encode(['bytes', 'bytes[]'], [actions, params]);
-  const body = abi.encode(['bytes', 'bytes[]', 'uint256'],
-                          ['0x' + CMD_V4_SWAP, [input], deadline]);
-
-  return {
-    to: ADDR.universalRouter,
-    data: SEL.execute + body.slice(2),
-    value: amountIn,
-    label: 'buy v4 ' + String(token).slice(0, 10),
-  };
-}
-
-export function callSwapExactIn({ tokenIn, tokenOut, fee, recipient, amountIn, minOut }) {
-  const data = SEL.exactInputSingle
-    + addr(tokenIn) + addr(tokenOut) + pad(fee) + addr(recipient)
-    + pad(amountIn) + pad(minOut) + pad(0);
-  return { to: ADDR.swapRouter, data, label: 'buy ' + tokenOut.slice(0, 10) };
-}
+export { TRANSFERS_PER_TX as PER_TX };
